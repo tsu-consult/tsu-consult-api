@@ -2,6 +2,8 @@
 from django.contrib.auth import get_user_model
 from django.core.validators import RegexValidator
 
+from apps.auth_app.models import TeacherApproval
+
 User = get_user_model()
 
 password_validator = RegexValidator(
@@ -58,6 +60,10 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
             user.set_password(validated_data["password"])
 
         user.save()
+
+        if role == User.Role.TEACHER:
+            TeacherApproval.objects.create(user=user)
+
         return user
 
 class RegisterResponseSerializer(serializers.Serializer):
