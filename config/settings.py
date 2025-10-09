@@ -64,6 +64,9 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'drf_yasg',
     'apps.auth_app',
+    'apps.profile_app',
+    'apps.teacher_app',
+    'apps.consultation_app',
     # 'corsheaders',
 ]
 
