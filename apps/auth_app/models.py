@@ -1,6 +1,9 @@
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
 from django.db import models
+
+from apps.auth_app.validators import validate_human_name
 
 
 class UserManager(BaseUserManager):
@@ -55,6 +58,19 @@ class User(AbstractUser):
 
     def __str__(self):
         return f"{self.username} ({self.role})"
+
+    def clean(self):
+        if self.first_name:
+            try:
+                validate_human_name(self.first_name, "first_name")
+            except ValueError as e:
+                raise ValidationError({"first_name": str(e)})
+
+        if self.last_name:
+            try:
+                validate_human_name(self.last_name, "last_name")
+            except ValueError as e:
+                raise ValidationError({"last_name": str(e)})
 
 
 class TeacherApproval(models.Model):

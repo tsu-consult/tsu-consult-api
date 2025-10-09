@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.core.validators import RegexValidator
 
 from apps.auth_app.models import TeacherApproval
+from apps.auth_app.validators import validate_human_name
 
 User = get_user_model()
 
@@ -41,6 +42,21 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
         elif role == User.Role.ADMIN:
             if not attrs.get("email") or not attrs.get("password"):
                 raise serializers.ValidationError("Email and password are required for the administrator.")
+
+        first_name = attrs.get("first_name")
+        last_name = attrs.get("last_name")
+
+        if first_name:
+            try:
+                validate_human_name(first_name, "first_name")
+            except ValueError as e:
+                raise serializers.ValidationError({"first_name": str(e)})
+
+        if last_name:
+            try:
+                validate_human_name(last_name, "last_name")
+            except ValueError as e:
+                raise serializers.ValidationError({"last_name": str(e)})
 
         return attrs
 
