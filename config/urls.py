@@ -28,9 +28,9 @@ PROJECT_NAME = BASE_DIR.name
 
 schema_view = get_schema_view(
     openapi.Info(
-        title=f"{PROJECT_NAME} API",
+        title=f"TSU Consult API",
         default_version='v1',
-        description=f"API docs for {PROJECT_NAME}.\n\n"
+        description=f"API docs for TSU Consult.\n\n"
                     f"<a href='/admin/' target='_blank'>➡️ Go to Django Admin</a>",
     ),
     public=True,
