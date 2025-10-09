@@ -6,8 +6,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.profile_app.serializers import UpdateProfileRequestSerializer
-from apps.profile_app.serializers import ProfileResponseSerializer
+from apps.profile_app.serializers import (
+    UpdateProfileRequestSerializer,
+    ProfileResponseSerializer,
+)
 from core.mixins import ErrorResponseMixin
 from core.serializers import ErrorResponseSerializer
 
@@ -18,22 +20,13 @@ class ProfileView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        tags=['profile'],
-        operation_summary="Получение данных текущего пользователя",
-        operation_description="Возвращает профиль авторизованного пользователя",
+        tags=['Profile'],
+        operation_summary="Получение профиля текущего пользователя",
+        operation_description="Возвращает информацию о текущем пользователе, включая роль и статус",
         responses={
-            200: openapi.Response(
-                description="Данные пользователя успешно получены",
-                schema=ProfileResponseSerializer
-            ),
-            401: openapi.Response(
-                description="Неавторизован",
-                schema=ErrorResponseSerializer
-            ),
-            500: openapi.Response(
-                description="Внутренняя ошибка сервера",
-                schema=ErrorResponseSerializer
-            ),
+            200: openapi.Response(description="Данные пользователя успешно получены", schema=ProfileResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
         }
     )
     def get(self, request):
@@ -42,38 +35,29 @@ class ProfileView(ErrorResponseMixin, APIView):
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "phone_number": user.phone_number,
             "first_name": user.first_name,
             "last_name": user.last_name,
+            "role": user.role,
+            "status": user.status,
         }
         return Response(data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
-        tags=['profile'],
+        tags=['Profile'],
         operation_summary="Редактирование профиля пользователя",
-        operation_description="Позволяет обновить username, email, first_name, last_name текущего пользователя",
+        operation_description="Позволяет обновить только first_name и last_name текущего пользователя.",
         request_body=UpdateProfileRequestSerializer,
         responses={
-            200: openapi.Response(
-                description="Профиль успешно обновлён",
-                schema=ProfileResponseSerializer
-            ),
-            400: openapi.Response(
-                description="Ошибка валидации данных",
-                schema=ErrorResponseSerializer
-            ),
-            401: openapi.Response(
-                description="Неавторизован",
-                schema=ErrorResponseSerializer
-            ),
-            500: openapi.Response(
-                description="Внутренняя ошибка сервера",
-                schema=ErrorResponseSerializer
-            ),
-        }
+            200: openapi.Response(description="Профиль успешно обновлён", schema=ProfileResponseSerializer),
+            400: openapi.Response(description="Ошибка валидации данных", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
     )
     def put(self, request):
         user = request.user
-        serializer = UpdateProfileRequestSerializer(user, data=request.data, partial=True, context={'request': request})
+        serializer = UpdateProfileRequestSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
@@ -81,7 +65,10 @@ class ProfileView(ErrorResponseMixin, APIView):
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "phone_number": user.phone_number,
             "first_name": user.first_name,
             "last_name": user.last_name,
+            "role": user.role,
+            "status": user.status,
         }
         return Response(data, status=status.HTTP_200_OK)
