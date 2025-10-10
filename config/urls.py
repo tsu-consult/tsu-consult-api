@@ -42,6 +42,7 @@ urlpatterns = [
     path('auth/', include('apps.auth_app.urls')),
     path('profile/', include('apps.profile_app.urls')),
     path('teachers/', include('apps.teacher_app.urls')),
+    path('consultations/', include('apps.consultation_app.urls')),
 
     path('', RedirectView.as_view(url='/swagger/', permanent=False)),
 ]

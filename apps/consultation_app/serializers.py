@@ -1,6 +1,6 @@
 ﻿from rest_framework import serializers
 
-from apps.consultation_app.models import Consultation
+from apps.consultation_app.models import Consultation, Booking
 
 
 class ConsultationSerializer(serializers.ModelSerializer):
@@ -30,3 +30,19 @@ class PaginatedConsultationsSerializer(serializers.Serializer):
     next = serializers.CharField(allow_null=True)
     previous = serializers.CharField(allow_null=True)
     results = ConsultationSerializer(many=True)
+
+
+class BookingRequestSerializer(serializers.Serializer):
+    message = serializers.CharField(required=True, allow_blank=False)
+
+
+class BookingResponseSerializer(serializers.ModelSerializer):
+    consultation_title = serializers.CharField(source="consultation.title", read_only=True)
+    teacher_name = serializers.CharField(source="consultation.teacher.get_full_name", read_only=True)
+
+    class Meta:
+        model = Booking
+        fields = [
+            "id", "consultation_id", "consultation_title",
+            "teacher_name", "message", "created_at"
+        ]

@@ -42,3 +42,26 @@ class Consultation(models.Model):
     def cancel(self):
         self.status = self.Status.CANCELLED
         self.save(update_fields=["status"])
+
+
+class Booking(models.Model):
+    id = models.AutoField(primary_key=True)
+    consultation = models.ForeignKey(
+        Consultation,
+        on_delete=models.CASCADE,
+        related_name="bookings"
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="bookings",
+        limit_choices_to={"role": "student"}
+    )
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("consultation", "student")
+
+    def __str__(self):
+        return f"Booking(student={self.student_id}, consultation={self.consultation_id})"
