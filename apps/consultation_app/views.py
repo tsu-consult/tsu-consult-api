@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 
 from apps.auth_app.permissions import IsStudent
 from apps.consultation_app.models import Consultation, Booking
-from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationSerializer, \
+from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
@@ -42,7 +42,7 @@ class ConsultationsView(ErrorResponseMixin, APIView):
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(consultations, request)
-        serializer = ConsultationSerializer(page, many=True)
+        serializer = ConsultationResponseSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
 

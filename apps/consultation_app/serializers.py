@@ -3,7 +3,7 @@
 from apps.consultation_app.models import Consultation, Booking
 
 
-class ConsultationSerializer(serializers.ModelSerializer):
+class ConsultationResponseSerializer(serializers.ModelSerializer):
     teacher_name = serializers.CharField(source="teacher.get_full_name", read_only=True)
 
     class Meta:
@@ -29,7 +29,7 @@ class PaginatedConsultationsSerializer(serializers.Serializer):
     current_page = serializers.IntegerField()
     next = serializers.CharField(allow_null=True)
     previous = serializers.CharField(allow_null=True)
-    results = ConsultationSerializer(many=True)
+    results = ConsultationResponseSerializer(many=True)
 
 
 class BookingRequestSerializer(serializers.Serializer):
