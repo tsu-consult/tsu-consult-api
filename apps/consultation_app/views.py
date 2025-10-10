@@ -46,7 +46,6 @@ class ConsultationsView(ErrorResponseMixin, APIView):
         return paginator.get_paginated_response(serializer.data)
 
 
-
 class BookConsultationView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 
@@ -85,3 +84,39 @@ class BookConsultationView(ErrorResponseMixin, APIView):
 
         response_serializer = BookingResponseSerializer(booking)
         return Response(response_serializer.data, status=201)
+
+class CancelBookingView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    @swagger_auto_schema(
+        tags=["Student"],
+        operation_summary="Отмена записи на консультацию",
+        operation_description="Позволяет студенту отменить свою запись на выбранную консультацию.",
+        responses={
+            204: openapi.Response(description="Запись успешно отменена"),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Запись не найдена", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def delete(self, request, consultation_id):
+        consultation = get_object_or_404(
+            Consultation,
+            id=consultation_id,
+            status=Consultation.Status.ACTIVE
+        )
+
+        booking = Booking.objects.filter(
+            consultation=consultation,
+            student=request.user
+        ).first()
+
+        if not booking:
+            return self.format_error(
+                request, 404, "Not Found",
+                "You are not registered for this consultation."
+            )
+
+        booking.delete()
+        return Response(status=204)
