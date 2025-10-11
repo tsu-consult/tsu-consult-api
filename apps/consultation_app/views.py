@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auth_app.permissions import IsStudent
-from apps.consultation_app.models import Consultation, Booking
+from apps.consultation_app.models import Consultation, Booking, ConsultationRequest
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
     ConsultationRequestResponseSerializer
@@ -144,3 +144,35 @@ class ConsultationRequestView(ErrorResponseMixin, APIView):
             consultation_request = serializer.save()
             return Response(ConsultationRequestResponseSerializer(consultation_request).data, status=201)
         return ErrorResponseMixin.format_error(request, 400, "Bad Request", serializer.errors)
+
+
+
+class ConsultationRequestsListView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated]
+    pagination_class = DefaultPagination
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Просмотр всех запросов на консультацию",
+        manual_parameters=[
+            openapi.Parameter( "page", openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1),
+            openapi.Parameter( "page_size", openapi.IN_QUERY, description="Количество элементов на странице", type=openapi.TYPE_INTEGER, default=10),
+            openapi.Parameter( "status", openapi.IN_QUERY, description="Фильтр по статусу (open, accepted, closed)", type=openapi.TYPE_STRING),
+        ],
+        responses={
+            200: openapi.Response(description="Список запросов на консультацию", schema=ConsultationRequestResponseSerializer(many=True)),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        }
+    )
+    def get(self, request):
+        requests = ConsultationRequest.objects.all().order_by("-created_at")
+
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            requests = requests.filter(status=status_filter)
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(requests, request)
+        serializer = ConsultationRequestResponseSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
