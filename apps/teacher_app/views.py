@@ -21,7 +21,7 @@ class TeacherListView(ErrorResponseMixin, APIView):
     pagination_class = DefaultPagination
 
     @swagger_auto_schema(
-        tags=['Student'],
+        tags=['Teachers'],
         operation_summary="Список подтверждённых преподавателей",
         manual_parameters=[
             openapi.Parameter('page', openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1),
@@ -50,7 +50,7 @@ class TeacherSubscribeView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 
     @swagger_auto_schema(
-        tags=["Student"],
+        tags=["Teachers"],
         operation_summary="Подписка на преподавателя",
         responses={
             201: openapi.Response(description="Подписка оформлена успешно"),
@@ -85,7 +85,7 @@ class TeacherUnsubscribeView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 
     @swagger_auto_schema(
-        tags=["Student"],
+        tags=["Teachers"],
         operation_summary="Отписка от преподавателя",
         responses={
             204: openapi.Response(description="Подписка успешно удалена"),

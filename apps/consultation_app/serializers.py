@@ -1,6 +1,6 @@
 ﻿from rest_framework import serializers
 
-from apps.consultation_app.models import Consultation, Booking
+from apps.consultation_app.models import Consultation, Booking, ConsultationRequest
 
 
 class ConsultationResponseSerializer(serializers.ModelSerializer):
@@ -32,9 +32,37 @@ class PaginatedConsultationsSerializer(serializers.Serializer):
     results = ConsultationResponseSerializer(many=True)
 
 
+class ConsultationRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConsultationRequest
+        fields = ["id", "title", "description", "status", "created_at", "updated_at"]
+        read_only_fields = ["id", "status", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        user = self.context["request"].user
+        return ConsultationRequest.objects.create(creator=user, **validated_data)
+
+class ConsultationRequestStudentSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    username = serializers.CharField()
+    first_name = serializers.CharField(allow_blank=True)
+    last_name = serializers.CharField(allow_blank=True)
+
+class ConsultationRequestResponseSerializer(serializers.ModelSerializer):
+    student = ConsultationRequestStudentSerializer(source="creator", read_only=True)
+
+    class Meta:
+        model = ConsultationRequest
+        fields = ["id", "title", "description", "status", "student", "created_at", "updated_at"]
+        read_only_fields = ["id", "status", "student", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        user = self.context["request"].user
+        return ConsultationRequest.objects.create(creator=user, **validated_data)
+
+
 class BookingRequestSerializer(serializers.Serializer):
     message = serializers.CharField(required=True, allow_blank=False)
-
 
 class BookingResponseSerializer(serializers.ModelSerializer):
     consultation_title = serializers.CharField(source="consultation.title", read_only=True)

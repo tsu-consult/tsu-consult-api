@@ -1,5 +1,5 @@
 from django.contrib import admin
-from apps.consultation_app.models import Consultation, Booking
+from apps.consultation_app.models import Consultation, Booking, ConsultationRequest
 
 
 @admin.register(Consultation)
@@ -35,4 +35,21 @@ class BookingAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
     readonly_fields = ("created_at",)
     autocomplete_fields = ("student", "consultation")
+    list_per_page = 25
+
+
+@admin.register(ConsultationRequest)
+class ConsultationRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "creator", "status", "created_at", "updated_at")
+    list_filter = ("status", "created_at", "updated_at")
+    search_fields = (
+        "title",
+        "description",
+        "creator__username",
+        "creator__first_name",
+        "creator__last_name"
+    )
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("creator",)
     list_per_page = 25

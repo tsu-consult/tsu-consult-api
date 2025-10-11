@@ -18,6 +18,7 @@ dependencies = [
     "celery (>=5.5.3,<6.0.0)",
     "redis (>=6.4.0,<7.0.0)",
     "celery-types (>=0.23.0,<0.24.0)",
+    "django-jazzmin (>=3.0.1,<4.0.0)",
 ]
 
 [tool.poetry]

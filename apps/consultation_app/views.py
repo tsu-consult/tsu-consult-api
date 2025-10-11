@@ -8,7 +8,8 @@ from rest_framework.views import APIView
 from apps.auth_app.permissions import IsStudent
 from apps.consultation_app.models import Consultation, Booking
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
-    BookingRequestSerializer, BookingResponseSerializer
+    BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
+    ConsultationRequestResponseSerializer
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
 from core.mixins import ErrorResponseMixin
@@ -19,7 +20,7 @@ class ConsultationsView(ErrorResponseMixin, APIView):
     pagination_class = DefaultPagination
 
     @swagger_auto_schema(
-        tags=["Student"],
+        tags=["Teachers"],
         operation_summary="Просмотр расписания выбранного преподавателя",
         manual_parameters=[
             openapi.Parameter("page", openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1,
@@ -50,7 +51,7 @@ class BookConsultationView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 
     @swagger_auto_schema(
-        tags=["Student"],
+        tags=["Consultations"],
         operation_summary="Запись на консультацию",
         operation_description="Студент записывается на консультацию, указав сообщение (обязательно).",
         request_body=BookingRequestSerializer,
@@ -89,7 +90,7 @@ class CancelBookingView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 
     @swagger_auto_schema(
-        tags=["Student"],
+        tags=["Consultations"],
         operation_summary="Отмена записи на консультацию",
         operation_description="Позволяет студенту отменить свою запись на выбранную консультацию.",
         responses={
@@ -120,3 +121,26 @@ class CancelBookingView(ErrorResponseMixin, APIView):
 
         booking.delete()
         return Response(status=204)
+
+
+class ConsultationRequestView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Создание запроса на консультацию",
+        request_body=ConsultationRequestSerializer,
+        responses={
+            201: openapi.Response(description="Запрос успешно создан", schema=ConsultationRequestResponseSerializer),
+            400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def post(self, request):
+        serializer = ConsultationRequestSerializer(data=request.data, context={"request": request})
+        if serializer.is_valid():
+            consultation_request = serializer.save()
+            return Response(ConsultationRequestResponseSerializer(consultation_request).data, status=201)
+        return ErrorResponseMixin.format_error(request, 400, "Bad Request", serializer.errors)
