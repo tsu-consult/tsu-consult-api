@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auth_app.permissions import IsStudent
-from apps.consultation_app.models import Consultation, Booking, ConsultationRequest
+from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, ConsultationRequestSubscription
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
     ConsultationRequestResponseSerializer
@@ -176,3 +176,34 @@ class ConsultationRequestsListView(ErrorResponseMixin, APIView):
         page = paginator.paginate_queryset(requests, request)
         serializer = ConsultationRequestResponseSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class ConsultationRequestSubscribeView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Подписка под запросом на консультацию",
+        operation_description="Студент подписывается под запросом, чтобы получить уведомление и быть автоматически записанным, если преподаватель создаст консультацию по этому запросу.",
+        responses={
+            201: openapi.Response(description="Подписка успешно создана"),
+            400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Запрос не найден", schema=ErrorResponseSerializer),
+            409: openapi.Response(description="Студент уже подписан под этим запросом", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        }
+    )
+    def post(self, request, request_id):
+        consultation_request = get_object_or_404(ConsultationRequest, id=request_id)
+
+        if consultation_request.status != ConsultationRequest.Status.OPEN:
+            return self.format_error(request, 400, "Bad Request", "This consultation request is not open for subscriptions.")
+
+        if ConsultationRequestSubscription.objects.filter(request=consultation_request, student=request.user).exists():
+            return self.format_error(request, 409, "Conflict", "You are already subscribed to this request.")
+
+        ConsultationRequestSubscription.objects.create(request=consultation_request, student=request.user)
+
+        return Response(status=201)

@@ -68,6 +68,27 @@ class ConsultationRequest(models.Model):
     def __str__(self):
         return f"{self.title} ({self.creator})"
 
+class ConsultationRequestSubscription(models.Model):
+    id = models.AutoField(primary_key=True)
+    request = models.ForeignKey(
+        "ConsultationRequest",
+        on_delete=models.CASCADE,
+        related_name="subscriptions"
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="request_subscriptions",
+        limit_choices_to={"role": "student"}
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("request", "student")
+
+    def __str__(self):
+        return f"Subscription(student={self.student_id}, request={self.request_id})"
+
 
 class Booking(models.Model):
     id = models.AutoField(primary_key=True)
