@@ -10,13 +10,14 @@ requires-python = ">=3.12,<4.0"
 dependencies = [
     "django (>=5.2.7)",
     "dj-database-url (>=3.0.1,<4.0.0)",
-    "psycopg2-binary (>=2.9.10,<3.0.0)",
+    "psycopg2-binary (>=2.9.11)",
     "drf-yasg (>=1.21.11)",
     "djangorestframework-simplejwt (>=5.5.1,<6.0.0)",
     "python-decouple (>=3.8,<4.0)",
     "poetry-core (>=2.0.0)",
     "celery (>=5.5.3,<6.0.0)",
     "redis (>=6.4.0,<7.0.0)",
+    "celery-types (>=0.23.0,<0.24.0)",
 ]
 
 [tool.poetry]
