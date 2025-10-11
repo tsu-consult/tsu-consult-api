@@ -25,7 +25,7 @@ def stop_docker_compose():
 def start_celery():
     print("⚙️ Starting Celery worker...")
     celery_process = subprocess.Popen(
-        ["celery", "-A", "config", "worker", "-l", "info"],
+        ["celery", "-A", "config", "worker", "-l", "info", "--pool=solo"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
