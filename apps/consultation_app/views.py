@@ -207,3 +207,31 @@ class ConsultationRequestSubscribeView(ErrorResponseMixin, APIView):
         ConsultationRequestSubscription.objects.create(request=consultation_request, student=request.user)
 
         return Response(status=201)
+
+class ConsultationRequestUnsubscribeView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Отмена подписки под запросом на консультацию",
+        responses={
+            204: openapi.Response(description="Подписка успешно отменена"),
+            400: openapi.Response(description="Вы не подписаны на этот запрос", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Запрос не найден", schema=ErrorResponseSerializer),
+        }
+    )
+    def delete(self, request, request_id):
+        consultation_request = get_object_or_404(ConsultationRequest, id=request_id)
+
+        subscription = ConsultationRequestSubscription.objects.filter(
+            request=consultation_request,
+            student=request.user
+        ).first()
+
+        if not subscription:
+            return self.format_error(request, 400, "Bad Request", "You are not subscribed to this request.")
+
+        subscription.delete()
+        return Response(status=204)
