@@ -1,6 +1,6 @@
-from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -12,9 +12,9 @@ from apps.consultation_app.serializers import PaginatedConsultationsSerializer, 
     ConsultationRequestResponseSerializer, ConsultationCreateSerializer, ConsultationUpdateSerializer, \
     StudentSerializer, PaginatedStudentsSerializer
 from apps.notification_app.models import Notification
+from core.mixins import ErrorResponseMixin
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
-from core.mixins import ErrorResponseMixin
 
 
 class ConsultationsView(ErrorResponseMixin, APIView):
@@ -103,7 +103,10 @@ class ConsultationStudentsView(ErrorResponseMixin, APIView):
     )
     def get(self, request, consultation_id):
         user = request.user
-        consultation = get_object_or_404(Consultation, id=consultation_id)
+        try:
+            consultation = Consultation.objects.get(id=consultation_id)
+        except Consultation.DoesNotExist:
+            raise NotFound("Consultation not found")
 
         if consultation.teacher != user:
             return self.format_error(request, 403, "Forbidden", "You are not the owner of this consultation.")
@@ -164,7 +167,10 @@ class ConsultationUpdateView(APIView):
         },
     )
     def patch(self, request, consultation_id):
-        consultation = get_object_or_404(Consultation, id=consultation_id, teacher=request.user)
+        try:
+            consultation = Consultation.objects.get(id=consultation_id, teacher=request.user)
+        except Consultation.DoesNotExist:
+            raise NotFound("Consultation not found")
         serializer = ConsultationUpdateSerializer(
             consultation, data=request.data, partial=True
         )
@@ -211,7 +217,10 @@ class BookConsultationView(ErrorResponseMixin, APIView):
         },
     )
     def post(self, request, consultation_id):
-        consultation = get_object_or_404(Consultation, id=consultation_id, status=Consultation.Status.ACTIVE)
+        try:
+            consultation = Consultation.objects.get(id=consultation_id, status=Consultation.Status.ACTIVE)
+        except Consultation.DoesNotExist:
+            raise NotFound("Consultation not found")
 
         if consultation.is_closed or consultation.bookings.count() >= consultation.max_students:
             return self.format_error(request, 400, "Bad Request", "Registration for this consultation is closed.")
@@ -247,11 +256,10 @@ class CancelBookingView(ErrorResponseMixin, APIView):
         },
     )
     def delete(self, request, consultation_id):
-        consultation = get_object_or_404(
-            Consultation,
-            id=consultation_id,
-            status=Consultation.Status.ACTIVE
-        )
+        try:
+            consultation = Consultation.objects.get(id=consultation_id, status=Consultation.Status.ACTIVE)
+        except Consultation.DoesNotExist:
+            raise NotFound("Consultation not found")
 
         booking = Booking.objects.filter(
             consultation=consultation,
@@ -341,7 +349,10 @@ class ConsultationRequestSubscribeView(ErrorResponseMixin, APIView):
         }
     )
     def post(self, request, request_id):
-        consultation_request = get_object_or_404(ConsultationRequest, id=request_id)
+        try:
+            consultation_request = ConsultationRequest.objects.get(id=request_id)
+        except ConsultationRequest.DoesNotExist:
+            raise NotFound("Consultation request not found")
 
         if consultation_request.status != ConsultationRequest.Status.OPEN:
             return self.format_error(request, 400, "Bad Request", "This consultation request is not open for subscriptions.")
@@ -368,7 +379,10 @@ class ConsultationRequestUnsubscribeView(ErrorResponseMixin, APIView):
         }
     )
     def delete(self, request, request_id):
-        consultation_request = get_object_or_404(ConsultationRequest, id=request_id)
+        try:
+            consultation_request = ConsultationRequest.objects.get(id=request_id)
+        except ConsultationRequest.DoesNotExist:
+            raise NotFound("Consultation request not found")
 
         subscription = ConsultationRequestSubscription.objects.filter(
             request=consultation_request,

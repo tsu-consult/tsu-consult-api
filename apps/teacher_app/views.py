@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
-from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -62,12 +62,14 @@ class TeacherSubscribeView(ErrorResponseMixin, APIView):
         },
     )
     def post(self, request, teacher_id):
-        teacher = get_object_or_404(
-            User,
-            id=teacher_id,
-            role=User.Role.TEACHER,
-            teacher_approval__status="approved",
-        )
+        try:
+            teacher = User.objects.get(
+                id=teacher_id,
+                role=User.Role.TEACHER,
+                teacher_approval__status="approved",
+            )
+        except User.DoesNotExist:
+            raise NotFound("Teacher not found")
 
         if Subscription.objects.filter(student=request.user, teacher=teacher).exists():
             return self.format_error(
@@ -97,12 +99,14 @@ class TeacherUnsubscribeView(ErrorResponseMixin, APIView):
         },
     )
     def delete(self, request, teacher_id):
-        teacher = get_object_or_404(
-            User,
-            id=teacher_id,
-            role=User.Role.TEACHER,
-            teacher_approval__status="approved",
-        )
+        try:
+            teacher = User.objects.get(
+                id=teacher_id,
+                role=User.Role.TEACHER,
+                teacher_approval__status="approved",
+            )
+        except User.DoesNotExist:
+            raise NotFound("Teacher not found")
 
         subscription = Subscription.objects.filter(student=request.user, teacher=teacher).first()
         if not subscription:
