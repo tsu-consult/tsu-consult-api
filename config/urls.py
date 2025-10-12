@@ -41,6 +41,8 @@ urlpatterns = [
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('auth/', include('apps.auth_app.urls')),
     path('profile/', include('apps.profile_app.urls')),
+    path('teachers/', include('apps.teacher_app.urls')),
+    path('consultations/', include('apps.consultation_app.urls')),
 
     path('', RedirectView.as_view(url='/swagger/', permanent=False)),
 ]

@@ -53,6 +53,7 @@ AUTH_USER_MODEL = 'auth_app.User'
 
 # Application definition
 INSTALLED_APPS = [
+    'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -64,6 +65,10 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'drf_yasg',
     'apps.auth_app',
+    'apps.profile_app',
+    'apps.teacher_app',
+    'apps.consultation_app',
+    'apps.notification_app',
     # 'corsheaders',
 ]
 
@@ -142,6 +147,14 @@ DATABASES = {
         'PORT': config('DB_PORT', default='5432'),
     }
 }
+
+# Celery
+CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = "Asia/Tomsk"
 
 
 # Password validation

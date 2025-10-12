@@ -46,7 +46,7 @@ class ProfileView(ErrorResponseMixin, APIView):
     @swagger_auto_schema(
         tags=['Profile'],
         operation_summary="Редактирование профиля пользователя",
-        operation_description="Позволяет обновить только first_name и last_name текущего пользователя.",
+        operation_description="Позволяет обновить только `first_name` и `last_name` текущего пользователя.",
         request_body=UpdateProfileRequestSerializer,
         responses={
             200: openapi.Response(description="Профиль успешно обновлён", schema=ProfileResponseSerializer),
