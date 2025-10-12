@@ -197,6 +197,33 @@ class ConsultationUpdateView(APIView):
 
         return Response(ConsultationResponseSerializer(consultation).data, status=200)
 
+class CloseConsultationView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Закрытие записи на консультацию",
+        responses={
+            200: openapi.Response(description="Запись на консультацию успешно закрыта", schema=ConsultationResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Консультация не найдена", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def post(self, request, consultation_id):
+        try:
+            consultation = Consultation.objects.get(id=consultation_id, teacher=request.user)
+        except Consultation.DoesNotExist:
+            raise NotFound("Consultation not found")
+
+        if consultation.is_closed:
+            return self.format_error(request, 400, "Bad Request", "Registration is already closed for this consultation.")
+
+        consultation.close_registration()
+
+        return Response(ConsultationResponseSerializer(consultation).data, status=200)
+
 
 class BookConsultationView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsStudent]

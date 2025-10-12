@@ -2,7 +2,7 @@
 
 from apps.consultation_app.views import BookConsultationView, CancelBookingView, ConsultationRequestView, \
     ConsultationRequestsListView, ConsultationRequestSubscribeView, ConsultationRequestUnsubscribeView, \
-    ConsultationCreateView, ConsultationUpdateView, MyConsultationsView, ConsultationStudentsView
+    ConsultationCreateView, ConsultationUpdateView, MyConsultationsView, ConsultationStudentsView, CloseConsultationView
 
 urlpatterns = [
     path("<int:consultation_id>/book/", BookConsultationView.as_view(), name="book-consultation"),
@@ -15,4 +15,5 @@ urlpatterns = [
     path("<int:consultation_id>/", ConsultationUpdateView.as_view(), name="update-consultation"),
     path("my/", MyConsultationsView.as_view(), name="my-consultations"),
     path("<int:consultation_id>/students/", ConsultationStudentsView.as_view(), name="consultation-students"),
+    path("<int:consultation_id>/close/", CloseConsultationView.as_view(), name="close-consultation"),
 ]
