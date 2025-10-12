@@ -3,6 +3,29 @@
 from apps.consultation_app.models import Consultation, Booking, ConsultationRequest
 
 
+class ConsultationCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Consultation
+        fields = ["title", "date", "start_time", "end_time", "max_students"]
+
+    def validate(self, attrs):
+        if attrs["start_time"] >= attrs["end_time"]:
+            raise serializers.ValidationError("The end time must be later than the start time.")
+        return attrs
+
+class ConsultationUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Consultation
+        fields = ["title", "date", "start_time", "end_time", "max_students"]
+
+    def validate(self, attrs):
+        start_time = attrs.get("start_time", getattr(self.instance, "start_time", None))
+        end_time = attrs.get("end_time", getattr(self.instance, "end_time", None))
+        if start_time and end_time and start_time >= end_time:
+            raise serializers.ValidationError("The end time must be later than the start time.")
+        return attrs
+
+
 class ConsultationResponseSerializer(serializers.ModelSerializer):
     teacher_name = serializers.CharField(source="teacher.get_full_name", read_only=True)
 

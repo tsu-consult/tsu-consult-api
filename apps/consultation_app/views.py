@@ -5,11 +5,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth_app.permissions import IsStudent
+from apps.auth_app.permissions import IsStudent, IsTeacher
 from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, ConsultationRequestSubscription
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
-    ConsultationRequestResponseSerializer
+    ConsultationRequestResponseSerializer, ConsultationCreateSerializer, ConsultationUpdateSerializer
+from apps.notification_app.models import Notification
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
 from core.mixins import ErrorResponseMixin
@@ -45,6 +46,81 @@ class ConsultationsView(ErrorResponseMixin, APIView):
         page = paginator.paginate_queryset(consultations, request)
         serializer = ConsultationResponseSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class ConsultationCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Создание консультации преподавателем",
+        request_body=ConsultationCreateSerializer,
+        responses={
+            201: openapi.Response(description="Консультация успешно создана", schema=ConsultationResponseSerializer),
+            400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def post(self, request):
+        serializer = ConsultationCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        consultation = serializer.save(teacher=request.user)
+
+        for sub in request.user.subscribers.select_related("student"):
+            Notification.objects.create(
+                user=sub.student,
+                title="Новое время консультации",
+                message=f"Преподаватель {request.user.get_full_name()} опубликовал консультацию «{consultation.title}».",
+                type=Notification.Type.TELEGRAM,
+            )
+
+        return Response(ConsultationResponseSerializer(consultation).data, status=201)
+
+class ConsultationUpdateView(APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Изменение консультации преподавателем",
+        request_body=ConsultationUpdateSerializer,
+        responses={
+            200: openapi.Response(description="Консультация успешно обновлена", schema=ConsultationResponseSerializer),
+            400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Консультация не найдена", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def patch(self, request, consultation_id):
+        consultation = get_object_or_404(Consultation, id=consultation_id, teacher=request.user)
+        serializer = ConsultationUpdateSerializer(
+            consultation, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        consultation = serializer.save()
+
+        remaining_slots = max(0, consultation.max_students - consultation.bookings.count())
+
+        subscribers = set(sub.student for sub in consultation.teacher.subscribers.all())
+        booked_students = set(booking.student for booking in consultation.bookings.all())
+        all_students_to_notify = subscribers.union(booked_students)
+
+        for student in all_students_to_notify:
+            Notification.objects.create(
+                user=student,
+                title=f"Изменение в расписании преподавателя {consultation.teacher.get_full_name()}",
+                message=(
+                    f"Консультация '{consultation.title}' была обновлена.\n"
+                    f"Дата: {consultation.date}, время: {consultation.start_time}-{consultation.end_time}.\n"
+                    f"Доступные места: {remaining_slots}"
+                ),
+                type=Notification.Type.TELEGRAM,
+            )
+
+        return Response(ConsultationResponseSerializer(consultation).data, status=200)
 
 
 class BookConsultationView(ErrorResponseMixin, APIView):

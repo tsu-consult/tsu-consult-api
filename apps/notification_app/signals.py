@@ -11,8 +11,8 @@ def trigger_notification_send(sender, instance, created, **kwargs):
         send_notification_task.delay(instance.id)
 
 
-@receiver([post_save, post_delete], sender=Consultation)
-def notify_subscribers_on_consultation_change(sender, instance, **kwargs):
+@receiver(post_delete, sender=Consultation)
+def notify_subscribers_on_consultation_delete(sender, instance, **kwargs):
     teacher = instance.teacher
     subscriptions = teacher.subscribers.all().select_related("student")
 
@@ -20,8 +20,7 @@ def notify_subscribers_on_consultation_change(sender, instance, **kwargs):
         student = sub.student
         Notification.objects.create(
             user=student,
-            title=f"Изменение расписания преподавателя {teacher.get_full_name()}",
-            message=f"Консультация '{instance.title}' была обновлена. "
-                    f"Дата: {instance.date}, время: {instance.start_time}-{instance.end_time}.",
+            title=f"Изменение в расписании преподавателя {teacher.get_full_name()}",
+            message=f"Консультация '{instance.title}' была отменена.",
             type=Notification.Type.TELEGRAM,
         )
