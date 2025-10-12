@@ -544,4 +544,15 @@ class ConsultationFromRequestView(ErrorResponseMixin, APIView):
         if consultation.bookings.count() >= consultation.max_students:
             consultation.close_registration(by_teacher=False)
 
+        teacher_subscribers = request.user.subscribers.select_related("student")
+        for sub in teacher_subscribers:
+            student = sub.student
+            if student not in [s.student for s in subscribed_students]:
+                Notification.objects.create(
+                    user=student,
+                    title="Новое время консультации",
+                    message=f"Преподаватель {request.user.get_full_name()} опубликовал консультацию «{consultation.title}».",
+                    type=Notification.Type.TELEGRAM,
+                )
+
         return Response(ConsultationResponseSerializer(consultation).data, status=201)
