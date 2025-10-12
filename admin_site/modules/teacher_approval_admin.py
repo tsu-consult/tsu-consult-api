@@ -33,7 +33,7 @@ class TeacherApprovalAdmin(admin.ModelAdmin):
                 count += 1
 
         level = messages.SUCCESS if new_status == TeacherApproval.Status.APPROVED else messages.WARNING
-        self.message_user(request, _(f"{count} преподавателей {success_message}."), level=level)
+        self.message_user(request, _(f"{count} teachers were {success_message}."), level=level)
 
     @admin.action(description=_("Confirm selected teachers"))
     def approve_teachers(self, request, queryset):
@@ -42,7 +42,7 @@ class TeacherApprovalAdmin(admin.ModelAdmin):
             queryset,
             new_status=TeacherApproval.Status.APPROVED,
             user_status=User.Status.ACTIVE,
-            success_message="подтверждено",
+            success_message="confirmed successfully",
         )
 
     @admin.action(description=_("Reject selected teachers"))
@@ -52,7 +52,7 @@ class TeacherApprovalAdmin(admin.ModelAdmin):
             queryset,
             new_status=TeacherApproval.Status.REJECTED,
             user_status=User.Status.REJECTED,
-            success_message="отклонено",
+            success_message="rejected successfully",
         )
 
     def save_model(self, request, obj: TeacherApproval, form, change):
