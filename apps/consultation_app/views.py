@@ -47,6 +47,40 @@ class ConsultationsView(ErrorResponseMixin, APIView):
         serializer = ConsultationResponseSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
+class MyConsultationsView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated]
+    pagination_class = DefaultPagination
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Просмотр своих консультаций",
+        operation_description=(
+            "Если пользователь — преподаватель, возвращаются созданные им консультации.\n"
+            "Если пользователь — студент, возвращаются консультации, на которые он записан."
+        ),
+        manual_parameters=[
+            openapi.Parameter("page", openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1),
+            openapi.Parameter("page_size", openapi.IN_QUERY, description="Количество элементов на странице", type=openapi.TYPE_INTEGER, default=10),
+        ],
+        responses={
+            200: openapi.Response(description="Список консультаций пользователя", schema=PaginatedConsultationsSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def get(self, request):
+        user = request.user
+
+        if user.is_teacher:
+            consultations = Consultation.objects.filter(teacher=user).order_by("-date", "-start_time")
+        else:
+            consultations = Consultation.objects.filter(bookings__student=user).order_by("-date", "-start_time")
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(consultations, request)
+        serializer = ConsultationResponseSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
 
 class ConsultationCreateView(APIView):
     permission_classes = [IsAuthenticated, IsTeacher]
