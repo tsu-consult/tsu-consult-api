@@ -2,6 +2,8 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django.conf import settings
 
+from apps.notification_app.models import Notification
+
 User = get_user_model()
 
 
@@ -48,6 +50,19 @@ class Consultation(models.Model):
         if self.is_closed and not self.closed_by_teacher and self.bookings.count() < self.max_students:
             self.is_closed = False
             self.save(update_fields=["is_closed"])
+
+            booked_students = set(self.bookings.values_list("student_id", flat=True))
+            for sub in self.teacher.subscribers.exclude(student_id__in=booked_students):
+                Notification.objects.create(
+                    user=sub.student,
+                    title="Переоткрытие записи на консультацию",
+                    message=(
+                        f"Запись на консультацию «{self.title}» преподавателя "
+                        f"{self.teacher.get_full_name()} была переоткрыта — "
+                        f"появилось свободное место. Запишитесь скорее!"
+                    ),
+                    type=Notification.Type.TELEGRAM,
+                )
 
     def cancel(self):
         self.status = self.Status.CANCELLED

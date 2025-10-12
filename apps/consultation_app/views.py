@@ -291,16 +291,9 @@ class CancelBookingView(ErrorResponseMixin, APIView):
         except Consultation.DoesNotExist:
             raise NotFound("Consultation not found")
 
-        booking = Booking.objects.filter(
-            consultation=consultation,
-            student=request.user
-        ).first()
-
+        booking = Booking.objects.filter(consultation=consultation, student=request.user).first()
         if not booking:
-            return self.format_error(
-                request, 404, "Not Found",
-                "You are not registered for this consultation."
-            )
+            return self.format_error(request, 404, "Not Found", "You are not registered for this consultation.")
 
         booking.delete()
 
