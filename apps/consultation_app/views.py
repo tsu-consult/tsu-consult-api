@@ -177,7 +177,15 @@ class ConsultationUpdateView(APIView):
         serializer.is_valid(raise_exception=True)
         consultation = serializer.save()
 
-        remaining_slots = max(0, consultation.max_students - consultation.bookings.count())
+        current_booked = consultation.bookings.count()
+
+        if consultation.max_students <= current_booked and not consultation.is_closed:
+            consultation.close_registration(by_teacher=False)
+        elif consultation.max_students > current_booked and consultation.is_closed and not consultation.closed_by_teacher:
+            consultation.is_closed = False
+            consultation.save(update_fields=["is_closed"])
+
+        remaining_slots = max(0, consultation.max_students - current_booked)
 
         subscribers = set(sub.student for sub in consultation.teacher.subscribers.all())
         booked_students = set(booking.student for booking in consultation.bookings.all())
