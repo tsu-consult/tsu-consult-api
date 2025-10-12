@@ -10,7 +10,7 @@ from apps.consultation_app.models import Consultation, Booking, ConsultationRequ
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
     ConsultationRequestResponseSerializer, ConsultationCreateSerializer, ConsultationUpdateSerializer, \
-    StudentSerializer, PaginatedStudentsSerializer
+    StudentSerializer, PaginatedStudentsSerializer, ConsultationFromRequestCreateSerializer
 from apps.notification_app.models import Notification
 from core.mixins import ErrorResponseMixin
 from core.pagination import DefaultPagination
@@ -482,7 +482,7 @@ class ConsultationFromRequestView(ErrorResponseMixin, APIView):
     @swagger_auto_schema(
         tags=["Consultations"],
         operation_summary="Создание консультации на основе запроса студентов",
-        request_body=ConsultationCreateSerializer,
+        request_body=ConsultationFromRequestCreateSerializer,
         responses={
             201: openapi.Response(description="Консультация успешно создана", schema=ConsultationResponseSerializer),
             400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
@@ -503,9 +503,19 @@ class ConsultationFromRequestView(ErrorResponseMixin, APIView):
                 request, 400, "Bad Request", "This request is already closed or accepted."
             )
 
-        serializer = ConsultationCreateSerializer(data=request.data)
+        serializer = ConsultationFromRequestCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        consultation = serializer.save(teacher=request.user)
+
+        title = serializer.validated_data.get("title") or consultation_request.title
+
+        consultation = Consultation.objects.create(
+            teacher=request.user,
+            title=title,
+            date=serializer.validated_data["date"],
+            start_time=serializer.validated_data["start_time"],
+            end_time=serializer.validated_data["end_time"],
+            max_students=serializer.validated_data["max_students"],
+        )
 
         consultation_request.status = ConsultationRequest.Status.ACCEPTED
         consultation_request.save(update_fields=["status"])
@@ -531,8 +541,7 @@ class ConsultationFromRequestView(ErrorResponseMixin, APIView):
                     type=Notification.Type.TELEGRAM,
                 )
 
-        total_students = consultation.bookings.count()
-        if total_students >= consultation.max_students:
+        if consultation.bookings.count() >= consultation.max_students:
             consultation.close_registration(by_teacher=False)
 
         return Response(ConsultationResponseSerializer(consultation).data, status=201)
