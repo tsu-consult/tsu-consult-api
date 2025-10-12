@@ -65,14 +65,23 @@ class ConsultationRequestSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         return ConsultationRequest.objects.create(creator=user, **validated_data)
 
-class ConsultationRequestStudentSerializer(serializers.Serializer):
+class StudentSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     username = serializers.CharField()
     first_name = serializers.CharField(allow_blank=True)
     last_name = serializers.CharField(allow_blank=True)
 
+class PaginatedStudentsSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    total_pages = serializers.IntegerField()
+    current_page = serializers.IntegerField()
+    next = serializers.CharField(allow_null=True)
+    previous = serializers.CharField(allow_null=True)
+    results = StudentSerializer(many=True)
+
+
 class ConsultationRequestResponseSerializer(serializers.ModelSerializer):
-    student = ConsultationRequestStudentSerializer(source="creator", read_only=True)
+    student = StudentSerializer(source="creator", read_only=True)
 
     class Meta:
         model = ConsultationRequest

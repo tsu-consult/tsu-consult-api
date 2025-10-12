@@ -9,7 +9,8 @@ from apps.auth_app.permissions import IsStudent, IsTeacher
 from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, ConsultationRequestSubscription
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
-    ConsultationRequestResponseSerializer, ConsultationCreateSerializer, ConsultationUpdateSerializer
+    ConsultationRequestResponseSerializer, ConsultationCreateSerializer, ConsultationUpdateSerializer, \
+    StudentSerializer, PaginatedStudentsSerializer
 from apps.notification_app.models import Notification
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
@@ -79,6 +80,40 @@ class MyConsultationsView(ErrorResponseMixin, APIView):
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(consultations, request)
         serializer = ConsultationResponseSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
+class ConsultationStudentsView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+    pagination_class = DefaultPagination
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Список студентов, записанных на консультацию",
+        manual_parameters=[
+            openapi.Parameter( "page", openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1),
+            openapi.Parameter( "page_size", openapi.IN_QUERY, description="Количество элементов на странице", type=openapi.TYPE_INTEGER, default=10),
+        ],
+        responses={
+            200: openapi.Response(description="Список записанных студентов", schema=PaginatedStudentsSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Консультация не найдена", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def get(self, request, consultation_id):
+        user = request.user
+        consultation = get_object_or_404(Consultation, id=consultation_id)
+
+        if consultation.teacher != user:
+            return self.format_error(request, 403, "Forbidden", "You are not the owner of this consultation.")
+
+        bookings = Booking.objects.filter(consultation=consultation).select_related("student")
+        students = [booking.student for booking in bookings]
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(students, request)
+        serializer = StudentSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
 
