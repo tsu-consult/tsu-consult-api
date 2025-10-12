@@ -150,7 +150,7 @@ class ConsultationCreateView(APIView):
 
         return Response(ConsultationResponseSerializer(consultation).data, status=201)
 
-class ConsultationUpdateView(APIView):
+class ConsultationUpdateView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsTeacher]
 
     @swagger_auto_schema(
@@ -171,6 +171,10 @@ class ConsultationUpdateView(APIView):
             consultation = Consultation.objects.get(id=consultation_id, teacher=request.user)
         except Consultation.DoesNotExist:
             raise NotFound("Consultation not found")
+
+        if consultation.status == Consultation.Status.CANCELLED:
+            return self.format_error(request, 400, "Bad Request", "Cancelled consultations cannot be modified.")
+
         serializer = ConsultationUpdateSerializer(
             consultation, data=request.data, partial=True
         )
@@ -224,6 +228,9 @@ class CloseConsultationView(ErrorResponseMixin, APIView):
             consultation = Consultation.objects.get(id=consultation_id, teacher=request.user)
         except Consultation.DoesNotExist:
             raise NotFound("Consultation not found")
+
+        if consultation.status != Consultation.Status.ACTIVE:
+            return self.format_error(request, 400, "Bad Request", "Only active consultations can be closed.")
 
         if consultation.is_closed:
             return self.format_error(request, 400, "Bad Request", "Registration is already closed for this consultation.")
