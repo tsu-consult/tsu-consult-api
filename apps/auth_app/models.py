@@ -59,6 +59,10 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.username} ({self.role})"
 
+    class Meta:
+        verbose_name = "User"
+        verbose_name_plural = "Users"
+
     def clean(self):
         if self.first_name:
             try:
@@ -105,3 +109,7 @@ class TeacherApproval(models.Model):
 
     def __str__(self):
         return f"TeacherApproval(id={self.id}, user={self.user_id}, status={self.status})"
+
+    class Meta:
+        verbose_name = "Approval"
+        verbose_name_plural = "Approvals"

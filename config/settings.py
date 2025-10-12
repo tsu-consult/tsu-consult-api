@@ -113,6 +113,30 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
+# Jazzmin
+JAZZMIN_SETTINGS = {
+    "site_title": "TSU Consult",
+    "site_header": "TSU Consult Admin",
+    "site_brand": "TSU Consult Admin",
+    "welcome_sign": "Welcome to the TSU Consult Admin",
+
+    "topmenu_links": [
+
+        {"name": "Home",  "url": "admin:index", "permissions": ["auth.view_user"]},
+    ],
+
+    "icons": {
+        "auth_app.user": "fas fa-user",
+        "auth_app.teacherapproval": "fas fa-chalkboard-teacher",
+    },
+
+    # "show_ui_builder" : True,
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "theme": "flatly",
+}
+
 
 # Swagger
 SWAGGER_SETTINGS = {

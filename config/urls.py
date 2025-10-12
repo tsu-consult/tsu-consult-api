@@ -22,6 +22,7 @@ from django.views.generic import RedirectView
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 
+from admin_site import admin_site
 from config.settings import BASE_DIR
 
 PROJECT_NAME = BASE_DIR.name
@@ -37,7 +38,8 @@ schema_view = get_schema_view(
 )
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('admin/', admin_site.urls),
+    path('project/admin/', admin.site.urls),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('auth/', include('apps.auth_app.urls')),
     path('profile/', include('apps.profile_app.urls')),
