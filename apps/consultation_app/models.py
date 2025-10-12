@@ -18,6 +18,7 @@ class Consultation(models.Model):
     end_time = models.TimeField()
     max_students = models.PositiveIntegerField(default=5)
     is_closed = models.BooleanField(default=False)
+    closed_by_teacher = models.BooleanField(default=False)
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -38,9 +39,15 @@ class Consultation(models.Model):
     def __str__(self):
         return f"{self.title} ({self.teacher.get_full_name() if hasattr(self.teacher, 'get_full_name') else self.teacher})"
 
-    def close_registration(self):
+    def close_registration(self, by_teacher=False):
         self.is_closed = True
-        self.save(update_fields=["is_closed"])
+        self.closed_by_teacher = by_teacher
+        self.save(update_fields=["is_closed", "closed_by_teacher"])
+
+    def open_registration_if_needed(self):
+        if self.is_closed and not self.closed_by_teacher and self.bookings.count() < self.max_students:
+            self.is_closed = False
+            self.save(update_fields=["is_closed"])
 
     def cancel(self):
         self.status = self.Status.CANCELLED

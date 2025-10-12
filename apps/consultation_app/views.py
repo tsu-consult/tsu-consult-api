@@ -220,7 +220,7 @@ class CloseConsultationView(ErrorResponseMixin, APIView):
         if consultation.is_closed:
             return self.format_error(request, 400, "Bad Request", "Registration is already closed for this consultation.")
 
-        consultation.close_registration()
+        consultation.close_registration(by_teacher=True)
 
         return Response(ConsultationResponseSerializer(consultation).data, status=200)
 
@@ -249,7 +249,7 @@ class BookConsultationView(ErrorResponseMixin, APIView):
         except Consultation.DoesNotExist:
             raise NotFound("Consultation not found")
 
-        if consultation.is_closed or consultation.bookings.count() >= consultation.max_students:
+        if consultation.is_closed:
             return self.format_error(request, 400, "Bad Request", "Registration for this consultation is closed.")
 
         if Booking.objects.filter(consultation=consultation, student=request.user).exists():
@@ -263,6 +263,9 @@ class BookConsultationView(ErrorResponseMixin, APIView):
             student=request.user,
             message=serializer.validated_data["message"],
         )
+
+        if consultation.bookings.count() >= consultation.max_students:
+            consultation.close_registration(by_teacher=False)
 
         response_serializer = BookingResponseSerializer(booking)
         return Response(response_serializer.data, status=201)
@@ -300,6 +303,9 @@ class CancelBookingView(ErrorResponseMixin, APIView):
             )
 
         booking.delete()
+
+        consultation.open_registration_if_needed()
+
         return Response(status=204)
 
 
