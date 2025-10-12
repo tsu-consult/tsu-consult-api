@@ -3,6 +3,29 @@
 from apps.consultation_app.models import Consultation, Booking, ConsultationRequest
 
 
+class ConsultationCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Consultation
+        fields = ["title", "date", "start_time", "end_time", "max_students"]
+
+    def validate(self, attrs):
+        if attrs["start_time"] >= attrs["end_time"]:
+            raise serializers.ValidationError("The end time must be later than the start time.")
+        return attrs
+
+class ConsultationUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Consultation
+        fields = ["title", "date", "start_time", "end_time", "max_students"]
+
+    def validate(self, attrs):
+        start_time = attrs.get("start_time", getattr(self.instance, "start_time", None))
+        end_time = attrs.get("end_time", getattr(self.instance, "end_time", None))
+        if start_time and end_time and start_time >= end_time:
+            raise serializers.ValidationError("The end time must be later than the start time.")
+        return attrs
+
+
 class ConsultationResponseSerializer(serializers.ModelSerializer):
     teacher_name = serializers.CharField(source="teacher.get_full_name", read_only=True)
 
@@ -42,14 +65,23 @@ class ConsultationRequestSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         return ConsultationRequest.objects.create(creator=user, **validated_data)
 
-class ConsultationRequestStudentSerializer(serializers.Serializer):
+class StudentSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     username = serializers.CharField()
     first_name = serializers.CharField(allow_blank=True)
     last_name = serializers.CharField(allow_blank=True)
 
+class PaginatedStudentsSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    total_pages = serializers.IntegerField()
+    current_page = serializers.IntegerField()
+    next = serializers.CharField(allow_null=True)
+    previous = serializers.CharField(allow_null=True)
+    results = StudentSerializer(many=True)
+
+
 class ConsultationRequestResponseSerializer(serializers.ModelSerializer):
-    student = ConsultationRequestStudentSerializer(source="creator", read_only=True)
+    student = StudentSerializer(source="creator", read_only=True)
 
     class Meta:
         model = ConsultationRequest
@@ -74,3 +106,19 @@ class BookingResponseSerializer(serializers.ModelSerializer):
             "id", "consultation_id", "consultation_title",
             "teacher_name", "message", "created_at"
         ]
+
+
+class ConsultationFromRequestCreateSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(required=False, allow_blank=True)
+    max_students = serializers.IntegerField(required=False, default=5)
+
+    class Meta:
+        model = Consultation
+        fields = ["title", "date", "start_time", "end_time", "max_students"]
+
+    def validate(self, attrs):
+        start_time = attrs.get("start_time")
+        end_time = attrs.get("end_time")
+        if start_time and end_time and start_time >= end_time:
+            raise serializers.ValidationError("The end time must be later than the start time.")
+        return attrs

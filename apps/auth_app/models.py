@@ -72,6 +72,14 @@ class User(AbstractUser):
             except ValueError as e:
                 raise ValidationError({"last_name": str(e)})
 
+    @property
+    def is_student(self):
+        return self.role == self.Role.STUDENT
+
+    @property
+    def is_teacher(self):
+        return self.role == self.Role.TEACHER
+
 
 class TeacherApproval(models.Model):
     class Status(models.TextChoices):
