@@ -232,6 +232,45 @@ class CloseConsultationView(ErrorResponseMixin, APIView):
 
         return Response(ConsultationResponseSerializer(consultation).data, status=200)
 
+class CancelConsultationView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Отмена консультации преподавателем",
+        responses={
+            204: openapi.Response(description="Консультация успешно отменена", schema=ConsultationResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Консультация не найдена", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def delete(self, request, consultation_id):
+        try:
+            consultation = Consultation.objects.get(id=consultation_id, teacher=request.user)
+        except Consultation.DoesNotExist:
+            raise NotFound("Consultation not found")
+
+        if consultation.status == Consultation.Status.CANCELLED:
+            return self.format_error(request, 400, "Bad Request", "Consultation is already cancelled.")
+
+        consultation.cancel()
+
+        booked_students = [booking.student for booking in consultation.bookings.select_related("student")]
+        for student in booked_students:
+            Notification.objects.create(
+                user=student,
+                title="Консультация отменена",
+                message=(
+                    f"Консультация «{consultation.title}» преподавателя "
+                    f"{consultation.teacher.get_full_name()} была отменена."
+                ),
+                type=Notification.Type.TELEGRAM,
+            )
+
+        return Response(status=204)
+
 
 class BookConsultationView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsStudent]

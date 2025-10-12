@@ -66,7 +66,8 @@ class Consultation(models.Model):
 
     def cancel(self):
         self.status = self.Status.CANCELLED
-        self.save(update_fields=["status"])
+        self.is_closed = True
+        self.save(update_fields=["status", "is_closed"])
 
 
 class ConsultationRequest(models.Model):
