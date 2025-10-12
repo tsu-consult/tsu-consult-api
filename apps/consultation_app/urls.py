@@ -3,7 +3,7 @@
 from apps.consultation_app.views import BookConsultationView, CancelBookingView, ConsultationRequestView, \
     ConsultationRequestsListView, ConsultationRequestSubscribeView, ConsultationRequestUnsubscribeView, \
     ConsultationCreateView, ConsultationUpdateView, MyConsultationsView, ConsultationStudentsView, \
-    CloseConsultationView, CancelConsultationView
+    CloseConsultationView, CancelConsultationView, ConsultationFromRequestView
 
 urlpatterns = [
     path("<int:consultation_id>/book/", BookConsultationView.as_view(), name="book-consultation"),
@@ -17,5 +17,6 @@ urlpatterns = [
     path("my/", MyConsultationsView.as_view(), name="my-consultations"),
     path("<int:consultation_id>/students/", ConsultationStudentsView.as_view(), name="consultation-students"),
     path("<int:consultation_id>/close/", CloseConsultationView.as_view(), name="close-consultation"),
-    path("<int:consultation_id>/delete/", CancelConsultationView.as_view(), name="cancel-consultation")
+    path("<int:consultation_id>/delete/", CancelConsultationView.as_view(), name="cancel-consultation"),
+    path("from/<int:request_id>/", ConsultationFromRequestView.as_view(), name="create-consultation-from-request"),
 ]

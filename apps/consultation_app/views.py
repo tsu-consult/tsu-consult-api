@@ -474,3 +474,65 @@ class ConsultationRequestUnsubscribeView(ErrorResponseMixin, APIView):
 
         subscription.delete()
         return Response(status=204)
+
+
+class ConsultationFromRequestView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Создание консультации на основе запроса студентов",
+        request_body=ConsultationCreateSerializer,
+        responses={
+            201: openapi.Response(description="Консультация успешно создана", schema=ConsultationResponseSerializer),
+            400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Запрос не найден", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def post(self, request, request_id):
+        try:
+            consultation_request = ConsultationRequest.objects.get(id=request_id)
+        except ConsultationRequest.DoesNotExist:
+            raise NotFound("Consultation request not found")
+
+        if consultation_request.status != ConsultationRequest.Status.OPEN:
+            return self.format_error(
+                request, 400, "Bad Request", "This request is already closed or accepted."
+            )
+
+        serializer = ConsultationCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        consultation = serializer.save(teacher=request.user)
+
+        consultation_request.status = ConsultationRequest.Status.ACCEPTED
+        consultation_request.save(update_fields=["status"])
+
+        subscribed_students = consultation_request.subscriptions.select_related("student")
+        for sub in subscribed_students:
+            student = sub.student
+            if not Booking.objects.filter(consultation=consultation, student=student).exists():
+                Booking.objects.create(
+                    consultation=consultation,
+                    student=student,
+                    message="Автоматическая запись по подписке на запрос"
+                )
+
+                Notification.objects.create(
+                    user=student,
+                    title=f"Вы записаны на консультацию «{consultation.title}»",
+                    message=(
+                        f"Вы были автоматически записаны на консультацию «{consultation.title}» преподавателя "
+                        f"{consultation.teacher.get_full_name()} "
+                        f"по вашему запросу «{consultation_request.title}»."
+                    ),
+                    type=Notification.Type.TELEGRAM,
+                )
+
+        total_students = consultation.bookings.count()
+        if total_students >= consultation.max_students:
+            consultation.close_registration(by_teacher=False)
+
+        return Response(ConsultationResponseSerializer(consultation).data, status=201)
