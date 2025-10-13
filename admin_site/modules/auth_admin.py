@@ -1,6 +1,6 @@
 ﻿from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from apps.auth_app.models import User
+from apps.auth_app.models import User, TeacherApproval
 from ..site import admin_site
 
 
@@ -23,17 +23,60 @@ class UserAdmin(BaseUserAdmin):
 
     actions = ['make_student', 'make_teacher', 'make_admin']
 
-    @admin.action(description="Make selected users students")
-    def make_student(self, request, queryset):
-        updated = queryset.update(role=User.Role.STUDENT)
-        self.message_user(request, f"{updated} пользователей теперь имеют роль Student.", level=messages.SUCCESS)
+    def save_model(self, request, obj: User, form, change):
+        if change:
+            old_obj = User.objects.get(pk=obj.pk)
+            if old_obj.role != obj.role:
+                if obj.role == User.Role.TEACHER:
+                    obj.status = User.Status.ACTIVE
+                elif old_obj.role == User.Role.TEACHER and obj.role != User.Role.TEACHER:
+                    approvals = TeacherApproval.objects.filter(user=obj, status=TeacherApproval.Status.PENDING)
+                    for approval in approvals:
+                        approval.status = TeacherApproval.Status.REJECTED
+                        approval.save()
+                    obj.status = User.Status.ACTIVE
+
+        super().save_model(request, obj, form, change)
 
     @admin.action(description="Make selected users teachers")
     def make_teacher(self, request, queryset):
-        updated = queryset.update(role=User.Role.TEACHER)
-        self.message_user(request, f"{updated} пользователей теперь имеют роль Teacher.", level=messages.SUCCESS)
+        updated_count = 0
+        for user in queryset:
+            if user.role != User.Role.TEACHER:
+                user.role = User.Role.TEACHER
+                user.status = User.Status.ACTIVE
+                user.save()
+                updated_count += 1
+        self.message_user(request, f"{updated_count} users now have the role of Teacher.", level=messages.SUCCESS)
+
+    @admin.action(description="Make selected users students")
+    def make_student(self, request, queryset):
+        updated_count = 0
+        for user in queryset:
+            old_role = user.role
+            user.role = User.Role.STUDENT
+            user.status = User.Status.ACTIVE
+            user.save()
+            if old_role == User.Role.TEACHER:
+                approvals = TeacherApproval.objects.filter(user=user, status=TeacherApproval.Status.PENDING)
+                for approval in approvals:
+                    approval.status = TeacherApproval.Status.REJECTED
+                    approval.save()
+            updated_count += 1
+        self.message_user(request, f"{updated_count} users now have the role of Student.", level=messages.SUCCESS)
 
     @admin.action(description="Make selected users administrators")
     def make_admin(self, request, queryset):
-        updated = queryset.update(role=User.Role.ADMIN)
-        self.message_user(request, f"{updated} пользователей теперь имеют роль Admin.", level=messages.SUCCESS)
+        updated_count = 0
+        for user in queryset:
+            old_role = user.role
+            user.role = User.Role.ADMIN
+            user.status = User.Status.ACTIVE
+            user.save()
+            if old_role == User.Role.TEACHER:
+                approvals = TeacherApproval.objects.filter(user=user, status=TeacherApproval.Status.PENDING)
+                for approval in approvals:
+                    approval.status = TeacherApproval.Status.REJECTED
+                    approval.save()
+            updated_count += 1
+        self.message_user(request, f"{updated_count} users now have the role of Admin.", level=messages.SUCCESS)
