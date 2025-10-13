@@ -10,7 +10,7 @@ from django.db.utils import OperationalError
 
 def start_docker_compose():
     print("🚀 Starting docker-compose services...")
-    subprocess.run(["docker", "compose", "up", "-d", "postgres"], check=True)
+    subprocess.run(["docker", "compose", "up", "-d"], check=True)
     print("✅ All services started.")
 
 def stop_docker_compose():
@@ -20,6 +20,25 @@ def stop_docker_compose():
         print("✅ Services stopped.")
     except subprocess.CalledProcessError:
         print("⚠️ Failed to stop services.")
+
+
+def start_celery():
+    print("⚙️ Starting Celery worker...")
+    celery_process = subprocess.Popen(
+        ["celery", "-A", "config", "worker", "-l", "info", "--pool=solo"]
+    )
+    print(f"✅ Celery worker started (PID: {celery_process.pid})")
+    atexit.register(lambda: stop_celery(celery_process))
+
+
+def stop_celery(process):
+    print("🛑 Stopping Celery worker...")
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+        print("✅ Celery worker stopped.")
+    except Exception as e:
+        print(f"⚠️ Failed to stop Celery: {e}")
 
 
 def wait_for_db():
@@ -72,6 +91,7 @@ def main():
         start_docker_compose()
         atexit.register(stop_docker_compose)
         wait_for_db()
+        start_celery()
 
     print("💾 Applying migrations automatically...")
     call_command("migrate", interactive=False)

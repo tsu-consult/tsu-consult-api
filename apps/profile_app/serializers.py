@@ -1,33 +1,46 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+from apps.auth_app.validators import validate_human_name
+
 User = get_user_model()
 
 class ProfileResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     username = serializers.CharField()
     email = serializers.EmailField()
+    phone_number = serializers.CharField(allow_null=True, allow_blank=True)
     first_name = serializers.CharField(allow_blank=True)
     last_name = serializers.CharField(allow_blank=True)
+    role = serializers.CharField()
+    status = serializers.CharField()
+
 
 class UpdateProfileRequestSerializer(serializers.ModelSerializer):
-    email = serializers.EmailField(required=True)
-    username = serializers.CharField(required=True)
     first_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'first_name', 'last_name']
+        fields = ['first_name', 'last_name']
 
-    def validate_email(self, value):
-        user = self.context['request'].user
-        if User.objects.exclude(id=user.id).filter(email=value).exists():
-            raise serializers.ValidationError("This email address is already in use by another user.")
+    def validate_first_name(self, value):
+        if value:
+            try:
+                validate_human_name(value, "first_name")
+            except ValueError as e:
+                raise serializers.ValidationError(str(e))
         return value
 
-    def validate_username(self, value):
-        user = self.context['request'].user
-        if User.objects.exclude(id=user.id).filter(username=value).exists():
-            raise serializers.ValidationError("The username is already in use by another user.")
+    def validate_last_name(self, value):
+        if value:
+            try:
+                validate_human_name(value, "last_name")
+            except ValueError as e:
+                raise serializers.ValidationError(str(e))
         return value
+
+
+class ResubmitTeacherApprovalResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    approval_id = serializers.IntegerField(read_only=True)
