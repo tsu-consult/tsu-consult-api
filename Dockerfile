@@ -33,6 +33,9 @@ COPY --from=builder /app /app
 COPY --from=builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+RUN mkdir -p /vol/web/static
+VOLUME /vol/web/static
+
 EXPOSE 8001
 
 CMD python manage.py collectstatic --noinput \
