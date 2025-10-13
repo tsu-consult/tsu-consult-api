@@ -6,7 +6,11 @@ class IsStudent(BasePermission):
 
 class IsTeacher(BasePermission):
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.role == 'teacher')
+        return bool(request.user and request.user.is_authenticated and request.user.role == 'teacher' and request.user.status == 'active')
+
+class IsActive(BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.user.status == 'active')
 
 class IsAdmin(BasePermission):
     def has_permission(self, request, view):
