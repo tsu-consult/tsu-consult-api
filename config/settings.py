@@ -151,7 +151,7 @@ SWAGGER_SETTINGS = {
     'DEFAULT_AUTO_SCHEMA_CLASS': 'core.schema.CustomAutoSchema',
     'OPERATIONS_SORTER' : 'method',
     'TAGS_SORTER' : 'alpha',
-    "DEFAULT_API_URL": "http://127.0.0.1:8001",
+    "DEFAULT_API_URL": "https://api.tsu-consult.orexi4.ru",
 }
 
 
