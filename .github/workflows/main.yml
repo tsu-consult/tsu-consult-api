@@ -1,0 +1,90 @@
+﻿  name: TSU Consult API CI/CD
+  
+  on:
+    push:
+      branches: [main]
+  
+  env:
+    DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/tsu-consult-api
+    DEPLOY_USERNAME: 'deployuser'
+  
+  jobs:
+    build-and-deploy:
+      runs-on: ubuntu-latest
+      environment: Production
+      
+      steps:
+        - name: 📥 Checkout repository
+          uses: actions/checkout@v4
+
+        - name: 🐍 Setup Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: 3.12
+
+        - name: 📦 Install Poetry
+          run: pip install poetry
+
+        - name: 📦 Install dependencies
+          run: poetry install --no-interaction --no-ansi
+
+        - name: 🔐 Login to Docker Hub
+          uses: docker/login-action@v3
+          with:
+            username: ${{ secrets.DOCKER_USERNAME }}
+            password: ${{ secrets.DOCKER_PASSWORD }}
+
+        - name: 🐳 Build and Push Docker image
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            file: ./Dockerfile
+            push: true
+            tags: |
+              ${{ env.DOCKER_IMAGE }}:latest
+              ${{ env.DOCKER_IMAGE }}:${{ github.run_number }}
+
+        - name: 🚀 Deploy to Server (SSH)
+          uses: appleboy/ssh-action@v1.0.3
+          with:
+            host: ${{ secrets.SSH_HOST }}
+            username: ${{ env.DEPLOY_USERNAME }}
+            key: ${{ secrets.SSH_PRIVATE_KEY }}
+            script: |
+              set -e
+              
+              echo "📦 Backup previous container..."
+              docker tag tsu-consult-api tsu-consult-api-backup || true
+              
+              echo "📥 Pull last image..."
+              docker pull ${{ env.DOCKER_IMAGE }}:latest
+              
+              echo "🛑 Stop and remove current container..."
+              docker stop tsu-consult-api || true
+              docker rm tsu-consult-api || true
+              
+              echo "🚀 Launch new container with media volume and env file..."
+              docker run -d \
+                --name tsu-consult-api \
+                -p 8001:8001 \
+                --env-file /home/${{ env.DEPLOY_USERNAME }}/tsu-consult.env \
+                --network ${{ env.DEPLOY_USERNAME }}_tsu-consult_net \
+                ${{ env.DOCKER_IMAGE }}:latest
+
+        - name: 🛠 Rollback
+          if: failure()
+          uses: appleboy/ssh-action@v1.0.3
+          with:
+            host: ${{ secrets.SSH_HOST }}
+            username: ${{ env.DEPLOY_USERNAME }}
+            key: ${{ secrets.SSH_PRIVATE_KEY }}
+            script: |
+              echo "⚠️ Deployment error. Rollback to previous container..."
+              docker stop tsu-consult-api || true
+              docker rm tsu-consult-api || true
+              docker run -d \
+                --name tsu-consult-api \
+                -p 8001:8001 \
+                --env-file /home/${{ env.DEPLOY_USERNAME }}/tsu-consult.env \
+                --network ${{ env.DEPLOY_USERNAME }}_tsu-consult_net \
+                tsu-consult-api-backup
