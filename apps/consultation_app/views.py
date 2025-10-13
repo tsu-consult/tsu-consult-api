@@ -83,7 +83,7 @@ class MyConsultationsView(ErrorResponseMixin, APIView):
         return paginator.get_paginated_response(serializer.data)
 
 class ConsultationStudentsView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated, IsTeacher]
+    permission_classes = [IsAuthenticated, IsTeacher, IsActive]
     pagination_class = DefaultPagination
 
     @swagger_auto_schema(
@@ -121,7 +121,7 @@ class ConsultationStudentsView(ErrorResponseMixin, APIView):
 
 
 class ConsultationCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsTeacher]
+    permission_classes = [IsAuthenticated, IsTeacher, IsActive]
 
     @swagger_auto_schema(
         tags=["Consultations"],
@@ -151,7 +151,7 @@ class ConsultationCreateView(APIView):
         return Response(ConsultationResponseSerializer(consultation).data, status=201)
 
 class ConsultationUpdateView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated, IsTeacher]
+    permission_classes = [IsAuthenticated, IsTeacher, IsActive]
 
     @swagger_auto_schema(
         tags=["Consultations"],
@@ -210,7 +210,7 @@ class ConsultationUpdateView(ErrorResponseMixin, APIView):
         return Response(ConsultationResponseSerializer(consultation).data, status=200)
 
 class CloseConsultationView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated, IsTeacher]
+    permission_classes = [IsAuthenticated, IsTeacher, IsActive]
 
     @swagger_auto_schema(
         tags=["Consultations"],
@@ -240,7 +240,7 @@ class CloseConsultationView(ErrorResponseMixin, APIView):
         return Response(ConsultationResponseSerializer(consultation).data, status=200)
 
 class CancelConsultationView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated, IsTeacher]
+    permission_classes = [IsAuthenticated, IsTeacher, IsActive]
 
     @swagger_auto_schema(
         tags=["Consultations"],
@@ -477,7 +477,7 @@ class ConsultationRequestUnsubscribeView(ErrorResponseMixin, APIView):
 
 
 class ConsultationFromRequestView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated, IsTeacher]
+    permission_classes = [IsAuthenticated, IsTeacher, IsActive]
 
     @swagger_auto_schema(
         tags=["Consultations"],

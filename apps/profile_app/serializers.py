@@ -39,3 +39,8 @@ class UpdateProfileRequestSerializer(serializers.ModelSerializer):
             except ValueError as e:
                 raise serializers.ValidationError(str(e))
         return value
+
+
+class ResubmitTeacherApprovalResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    approval_id = serializers.IntegerField(read_only=True)

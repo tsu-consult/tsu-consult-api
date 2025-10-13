@@ -92,10 +92,10 @@ class TeacherApproval(models.Model):
         REJECTED = "rejected", "Rejected"
 
     id = models.AutoField(primary_key=True)
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name="teacher_approval",
+        related_name="teacher_approvals",
         limit_choices_to={"role": "teacher"},
     )
     status = models.CharField(
