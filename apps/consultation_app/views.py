@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth_app.permissions import IsStudent, IsTeacher
+from apps.auth_app.permissions import IsStudent, IsTeacher, IsActive
 from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, ConsultationRequestSubscription
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
@@ -49,7 +49,7 @@ class ConsultationsView(ErrorResponseMixin, APIView):
         return paginator.get_paginated_response(serializer.data)
 
 class MyConsultationsView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsActive]
     pagination_class = DefaultPagination
 
     @swagger_auto_schema(
@@ -381,7 +381,7 @@ class ConsultationRequestView(ErrorResponseMixin, APIView):
 
 
 class ConsultationRequestsListView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsActive]
     pagination_class = DefaultPagination
 
     @swagger_auto_schema(
