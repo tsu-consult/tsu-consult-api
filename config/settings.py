@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 from pathlib import Path
 
-from decouple import config
+from decouple import config, Csv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,26 +26,23 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-hmdjttbm9-tgx#uk91435
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-if DEBUG:
-    ALLOWED_HOSTS = ["*"]
-else:
-    ALLOWED_HOSTS = ["yourdomain.com"]
-# SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-# SECURE_SSL_REDIRECT = True
-# SESSION_COOKIE_SECURE = True
-# CSRF_COOKIE_SECURE = True
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 
 # CSRF_TRUSTED_ORIGINS = [
-#     'http://localhost:8000',
-#     'http://127.0.0.1:8000',
+#     'http://localhost:8001',
+#     'http://127.0.0.1:8001',
 # ]
 # 
 # CORS_ALLOWED_ORIGINS = [
-#     'http://localhost:8000',
-#     'http://127.0.0.1:8000',
+#     'http://localhost:8001',
+#     'http://127.0.0.1:8001',
 # ]
 
-# CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = True
 
 # SECURITY
 AUTH_USER_MODEL = 'auth_app.User'
@@ -69,7 +66,7 @@ INSTALLED_APPS = [
     'apps.teacher_app',
     'apps.consultation_app',
     'apps.notification_app',
-    # 'corsheaders',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
@@ -80,7 +77,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    # 'corsheaders.middleware.CorsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
 
 REST_FRAMEWORK = {
@@ -154,7 +151,7 @@ SWAGGER_SETTINGS = {
     'DEFAULT_AUTO_SCHEMA_CLASS': 'core.schema.CustomAutoSchema',
     'OPERATIONS_SORTER' : 'method',
     'TAGS_SORTER' : 'alpha',
-    "DEFAULT_API_URL": "http://127.0.0.1:8000",
+    "DEFAULT_API_URL": "https://api.tsu-consult.orexi4.ru",
 }
 
 
@@ -173,12 +170,12 @@ DATABASES = {
 }
 
 # Celery
-CELERY_BROKER_URL = "redis://localhost:6379/0"
-CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_TIMEZONE = "Asia/Tomsk"
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
+CELERY_ACCEPT_CONTENT = config("CELERY_ACCEPT_CONTENT", default="json", cast=Csv())
+CELERY_TASK_SERIALIZER = config("CELERY_TASK_SERIALIZER", default="json")
+CELERY_RESULT_SERIALIZER = config("CELERY_RESULT_SERIALIZER", default="json")
+CELERY_TIMEZONE = config("CELERY_TIMEZONE", default="Asia/Tomsk")
 
 
 # Password validation
@@ -220,13 +217,6 @@ if DEBUG:
     STATIC_ROOT = BASE_DIR / "vol/web/static"
 else:
     STATIC_ROOT = '/vol/web/static'
-
-MEDIA_URL = "/media/"
-if DEBUG:
-    MEDIA_ROOT = BASE_DIR / "vol/web/media"
-else:
-    MEDIA_ROOT = "/vol/web/media"
-
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
