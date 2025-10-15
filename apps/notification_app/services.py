@@ -4,9 +4,10 @@ from decouple import config
 from django.utils import timezone
 
 from apps.notification_app.models import Notification
+from config.settings import REDIS_FLAGS_URL
 
 redis_flags = redis.StrictRedis.from_url(
-    config('REDIS_FLAGS_URL', default='redis://localhost:6380/2'),
+    REDIS_FLAGS_URL,
     decode_responses=True,
 )
 
