@@ -24,7 +24,7 @@ def notify_teacher_on_approval_status(sender, instance: TeacherApproval, created
             message = "Поздравляем! Ваша заявка на подтверждение преподавателя была одобрена."
         else:
             title = "Заявка отклонена"
-            reason_text = f" Причина: {instance.reason}" if instance.reason else ""
+            reason_text = f"\n\n<b>Причина:<b> {instance.reason}" if instance.reason else ""
             message = f"К сожалению, ваша заявка на подтверждение преподавателя была отклонена.{reason_text}"
         
         Notification.objects.create(

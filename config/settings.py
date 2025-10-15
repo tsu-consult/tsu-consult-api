@@ -169,6 +169,9 @@ DATABASES = {
     }
 }
 
+# Redis
+REDIS_FLAGS_URL = config('REDIS_FLAGS_URL', default='redis://localhost:6379/1')
+
 # Celery
 CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
@@ -176,6 +179,9 @@ CELERY_ACCEPT_CONTENT = config("CELERY_ACCEPT_CONTENT", default="json", cast=Csv
 CELERY_TASK_SERIALIZER = config("CELERY_TASK_SERIALIZER", default="json")
 CELERY_RESULT_SERIALIZER = config("CELERY_RESULT_SERIALIZER", default="json")
 CELERY_TIMEZONE = config("CELERY_TIMEZONE", default="Asia/Tomsk")
+
+#Bot
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
