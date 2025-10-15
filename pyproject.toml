@@ -19,6 +19,8 @@ dependencies = [
     "redis (>=6.4.0,<7.0.0)",
     "celery-types (>=0.23.0,<0.24.0)",
     "django-jazzmin (>=3.0.1,<4.0.0)",
+    "django-cors-headers (>=4.9.0)",
+    "gunicorn (>=23.0.0)",
     "requests (>=2.32.5,<3.0.0)",
 ]
 

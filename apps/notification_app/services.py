@@ -1,19 +1,19 @@
-﻿import redis
+import redis
 import requests
-from decouple import config
-from django.conf import settings
 from django.utils import timezone
+
 from apps.notification_app.models import Notification
+from config.settings import REDIS_FLAGS_URL, TELEGRAM_BOT_TOKEN
 
 redis_flags = redis.StrictRedis.from_url(
-    config("REDIS_FLAGS_URL", default="redis://localhost:6379/1"),
+    REDIS_FLAGS_URL,
     decode_responses=True,
 )
 
 def send_telegram_notification(notification: Notification):
     user = notification.user
     chat_id = getattr(user, "telegram_id", None)
-    bot_token = getattr(settings, "TELEGRAM_BOT_TOKEN", None)
+    bot_token = TELEGRAM_BOT_TOKEN
 
     if not bot_token:
         print("⚠️ TELEGRAM_BOT_TOKEN не задан в settings.py")
