@@ -170,7 +170,7 @@ DATABASES = {
 }
 
 # Celery
-CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6380/0")
 CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
 CELERY_ACCEPT_CONTENT = config("CELERY_ACCEPT_CONTENT", default="json", cast=Csv())
 CELERY_TASK_SERIALIZER = config("CELERY_TASK_SERIALIZER", default="json")
