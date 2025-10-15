@@ -10,6 +10,6 @@ app.autodiscover_tasks()
 app.conf.beat_schedule = {
     "retry-pending-notifications-every-5-min": {
         "task": "apps.notification_app.tasks.retry_pending_notifications",
-        "schedule": 300.0,
+        "schedule": 120.0,
     },
 }
