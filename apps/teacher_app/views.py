@@ -37,7 +37,7 @@ class TeacherListView(ErrorResponseMixin, APIView):
     def get(self, request):
         teachers = User.objects.filter(
             role=User.Role.TEACHER,
-            teacher_approval__status="approved"
+            teacher_approvals__status="approved"
         ).order_by("last_name", "first_name")
 
         paginator = self.pagination_class()
