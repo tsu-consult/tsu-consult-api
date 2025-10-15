@@ -10,3 +10,9 @@ def send_notification_task(notification_id):
         return
     if notification.type == Notification.Type.TELEGRAM:
         send_telegram_notification(notification)
+
+@shared_task
+def retry_pending_notifications():
+    pending = Notification.objects.filter(status=Notification.Status.PENDING)
+    for n in pending:
+        send_telegram_notification(n)
