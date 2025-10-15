@@ -144,7 +144,7 @@ class ConsultationCreateView(APIView):
             Notification.objects.create(
                 user=sub.student,
                 title="Новое время консультации",
-                message=f"Преподаватель {request.user.get_full_name()} опубликовал консультацию «{consultation.title}».",
+                message=f"Преподаватель {request.user.get_full_name()} опубликовал(-a) консультацию «{consultation.title}».",
                 type=Notification.Type.TELEGRAM,
             )
 
@@ -551,7 +551,7 @@ class ConsultationFromRequestView(ErrorResponseMixin, APIView):
                 Notification.objects.create(
                     user=student,
                     title="Новое время консультации",
-                    message=f"Преподаватель {request.user.get_full_name()} опубликовал консультацию «{consultation.title}».",
+                    message=f"Преподаватель {request.user.get_full_name()} опубликовал(-a) консультацию «{consultation.title}».",
                     type=Notification.Type.TELEGRAM,
                 )
 
