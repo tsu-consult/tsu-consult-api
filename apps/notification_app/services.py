@@ -6,7 +6,7 @@ from django.utils import timezone
 from apps.notification_app.models import Notification
 
 redis_flags = redis.StrictRedis.from_url(
-    config('REDIS_FLAGS_URL', default='redis://localhost:6379/1'),
+    config('REDIS_FLAGS_URL', default='redis://localhost:6380/2'),
     decode_responses=True,
 )
 
