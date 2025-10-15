@@ -28,14 +28,16 @@ def send_telegram_notification(notification: Notification):
         return
 
     try:
-        flag_key = f"logged_in:{chat_id}"
-        logged_in = redis_flags.get(flag_key)
-
+        logged_in = redis_flags.get(f"logged_in:{chat_id}")
         if logged_in != "1":
-            print(f"⏸ Пользователь {user.username} ({chat_id}) не залогинен — уведомление отложено")
+            print(f"❌ Пользователь {user.username} ({chat_id}) не залогинен — уведомление не отправлено")
+            notification.status = Notification.Status.FAILED
+            notification.save(update_fields=["status"])
             return
     except Exception as e:
         print(f"⚠️ Ошибка при проверке Redis: {e}")
+        notification.status = Notification.Status.FAILED
+        notification.save(update_fields=["status"])
         return
 
     try:
