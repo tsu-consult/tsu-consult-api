@@ -177,8 +177,6 @@ CELERY_TASK_SERIALIZER = config("CELERY_TASK_SERIALIZER", default="json")
 CELERY_RESULT_SERIALIZER = config("CELERY_RESULT_SERIALIZER", default="json")
 CELERY_TIMEZONE = config("CELERY_TIMEZONE", default="Asia/Tomsk")
 
-TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
-
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
