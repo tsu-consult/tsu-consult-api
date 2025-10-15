@@ -1,9 +1,16 @@
-﻿import requests
+import redis
+import requests
 from decouple import config
+from decouple import config
+from django.conf import settings
 from django.utils import timezone
 
 from apps.notification_app.models import Notification
 
+redis_flags = redis.StrictRedis.from_url(
+    config("REDIS_FLAGS_URL", default="redis://localhost:6379/1"),
+    decode_responses=True,
+)
 
 def send_telegram_notification(notification: Notification):
     user = notification.user
@@ -20,6 +27,17 @@ def send_telegram_notification(notification: Notification):
         print(f"⚠️ У пользователя {user.username} нет telegram_id — уведомление не отправлено")
         notification.status = Notification.Status.FAILED
         notification.save(update_fields=["status"])
+        return
+
+    try:
+        flag_key = f"logged_in:{chat_id}"
+        logged_in = redis_flags.get(flag_key)
+
+        if logged_in != "1":
+            print(f"⏸ Пользователь {user.username} ({chat_id}) не залогинен — уведомление отложено")
+            return
+    except Exception as e:
+        print(f"⚠️ Ошибка при проверке Redis: {e}")
         return
 
     try:
