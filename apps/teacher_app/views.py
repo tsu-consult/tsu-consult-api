@@ -66,7 +66,7 @@ class TeacherSubscribeView(ErrorResponseMixin, APIView):
             teacher = User.objects.get(
                 id=teacher_id,
                 role=User.Role.TEACHER,
-                teacher_approval__status="approved",
+                teacher_approvals__status="approved",
             )
         except User.DoesNotExist:
             raise NotFound("Teacher not found")
@@ -103,7 +103,7 @@ class TeacherUnsubscribeView(ErrorResponseMixin, APIView):
             teacher = User.objects.get(
                 id=teacher_id,
                 role=User.Role.TEACHER,
-                teacher_approval__status="approved",
+                teacher_approvals__status="approved",
             )
         except User.DoesNotExist:
             raise NotFound("Teacher not found")
