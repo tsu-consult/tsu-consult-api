@@ -9,6 +9,7 @@ def send_telegram_notification(notification: Notification):
     user = notification.user
     chat_id = getattr(user, "telegram_id", None)
     bot_token = config('TELEGRAM_BOT_TOKEN', default='')
+    print(bot_token)
 
     if not bot_token:
         print("⚠️ TELEGRAM_BOT_TOKEN не задан в settings.py")
