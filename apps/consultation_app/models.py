@@ -138,12 +138,12 @@ class Booking(models.Model):
 
 
 class StudentWithMessageSerializer(serializers.ModelSerializer):
-    message = serializers.SerializerMethodField()
+    id = serializers.IntegerField(source='student.id')
+    username = serializers.CharField(source='student.username')
+    first_name = serializers.CharField(source='student.first_name')
+    last_name = serializers.CharField(source='student.last_name')
+    message = serializers.CharField()
 
     class Meta:
-        model = User
+        model = Booking
         fields = ('id', 'username', 'first_name', 'last_name', 'message')
-
-    @staticmethod
-    def get_message(obj):
-        return obj.message
