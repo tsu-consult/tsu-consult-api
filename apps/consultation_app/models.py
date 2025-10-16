@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.db import models
 from django.conf import settings
+from rest_framework import serializers
 
 from apps.notification_app.models import Notification
 
@@ -134,3 +135,15 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"Booking(student={self.student_id}, consultation={self.consultation_id})"
+
+
+class StudentWithMessageSerializer(serializers.ModelSerializer):
+    message = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'first_name', 'last_name', 'message')
+
+    @staticmethod
+    def get_message(obj):
+        return obj.message
