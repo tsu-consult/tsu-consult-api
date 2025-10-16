@@ -1,6 +1,6 @@
 ﻿from rest_framework import serializers
 
-from apps.consultation_app.models import Consultation, Booking, ConsultationRequest
+from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, StudentWithMessageSerializer
 
 
 class ConsultationCreateSerializer(serializers.ModelSerializer):
@@ -77,7 +77,7 @@ class PaginatedStudentsSerializer(serializers.Serializer):
     current_page = serializers.IntegerField()
     next = serializers.CharField(allow_null=True)
     previous = serializers.CharField(allow_null=True)
-    results = StudentSerializer(many=True)
+    results = StudentWithMessageSerializer(many=True)
 
 
 class ConsultationRequestResponseSerializer(serializers.ModelSerializer):
