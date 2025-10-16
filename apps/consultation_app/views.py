@@ -25,9 +25,9 @@ class ConsultationsView(ErrorResponseMixin, APIView):
         tags=["Teachers"],
         operation_summary="Просмотр расписания выбранного преподавателя",
         manual_parameters=[
-            openapi.Parameter("page", openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1,
-            ),
+            openapi.Parameter("page", openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1),
             openapi.Parameter("page_size", openapi.IN_QUERY, description="Количество элементов на странице", type=openapi.TYPE_INTEGER, default=10),
+            openapi.Parameter("is_closed", openapi.IN_QUERY, description="Фильтр по закрытым консультациям (true / false)", type=openapi.TYPE_BOOLEAN),
         ],
         responses={
             200: openapi.Response(description="Список консультаций преподавателя", schema=PaginatedConsultationsSerializer),
@@ -42,6 +42,13 @@ class ConsultationsView(ErrorResponseMixin, APIView):
             teacher_id=teacher_id,
             status=Consultation.Status.ACTIVE,
         ).order_by("date", "start_time")
+
+        is_closed_param = request.query_params.get("is_closed")
+        if is_closed_param is not None:
+            if is_closed_param.lower() in ["true", "1"]:
+                consultations = consultations.filter(is_closed=True)
+            elif is_closed_param.lower() in ["false", "0"]:
+                consultations = consultations.filter(is_closed=False)
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(consultations, request)
@@ -62,6 +69,7 @@ class MyConsultationsView(ErrorResponseMixin, APIView):
         manual_parameters=[
             openapi.Parameter("page", openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1),
             openapi.Parameter("page_size", openapi.IN_QUERY, description="Количество элементов на странице", type=openapi.TYPE_INTEGER, default=10),
+            openapi.Parameter("is_closed", openapi.IN_QUERY, description="Фильтр по закрытым консультациям (true / false)", type=openapi.TYPE_BOOLEAN),
         ],
         responses={
             200: openapi.Response(description="Список консультаций пользователя", schema=PaginatedConsultationsSerializer),
@@ -76,6 +84,13 @@ class MyConsultationsView(ErrorResponseMixin, APIView):
             consultations = Consultation.objects.filter(teacher=user).order_by("-date", "-start_time")
         else:
             consultations = Consultation.objects.filter(bookings__student=user).order_by("-date", "-start_time")
+
+        is_closed_param = request.query_params.get("is_closed")
+        if is_closed_param is not None:
+            if is_closed_param.lower() in ["true", "1"]:
+                consultations = consultations.filter(is_closed=True)
+            elif is_closed_param.lower() in ["false", "0"]:
+                consultations = consultations.filter(is_closed=False)
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(consultations, request)
