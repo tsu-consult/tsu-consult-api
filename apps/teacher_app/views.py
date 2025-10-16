@@ -119,3 +119,31 @@ class TeacherUnsubscribeView(ErrorResponseMixin, APIView):
 
         subscription.delete()
         return Response(status=204)
+
+
+class TeacherSubscribedListView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+    pagination_class = DefaultPagination
+
+    @swagger_auto_schema(
+        tags=["Teachers"],
+        operation_summary="Список преподавателей, на которых подписан студент",
+        manual_parameters=[
+            openapi.Parameter('page', openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1),
+            openapi.Parameter('page_size', openapi.IN_QUERY, description="Количество элементов на странице", type=openapi.TYPE_INTEGER, default=10),
+        ],
+        responses={
+            200: openapi.Response(description="Список подписанных преподавателей", schema=PaginatedTeachersSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def get(self, request):
+        subscriptions = Subscription.objects.filter(student=request.user).select_related('teacher')
+        teachers = [sub.teacher for sub in subscriptions]
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(teachers, request)
+        serializer = TeacherResponseSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)

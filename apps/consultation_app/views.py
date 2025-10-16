@@ -475,6 +475,35 @@ class ConsultationRequestUnsubscribeView(ErrorResponseMixin, APIView):
         subscription.delete()
         return Response(status=204)
 
+class ConsultationRequestSubscribedListView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+    pagination_class = DefaultPagination
+
+    @swagger_auto_schema(
+        tags=["Consultations"],
+        operation_summary="Список запросов, на которые подписан студент",
+        manual_parameters=[
+            openapi.Parameter('page', openapi.IN_QUERY, description="Номер страницы", type=openapi.TYPE_INTEGER, default=1),
+            openapi.Parameter('page_size', openapi.IN_QUERY, description="Количество элементов на странице", type=openapi.TYPE_INTEGER, default=10),
+        ],
+        responses={
+            200: openapi.Response(description="Список подписанных преподавателей", schema=ConsultationRequestResponseSerializer(many=True)),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def get(self, request):
+        subscriptions = ConsultationRequestSubscription.objects.filter(
+            student=request.user
+        ).select_related('request', 'request__creator')
+        requests = [sub.request for sub in subscriptions]
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(requests, request)
+        serializer = ConsultationRequestResponseSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
 
 class ConsultationFromRequestView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsTeacher, IsActive]
