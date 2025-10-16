@@ -128,10 +128,9 @@ class ConsultationStudentsView(ErrorResponseMixin, APIView):
             return self.format_error(request, 403, "Forbidden", "You are not the owner of this consultation.")
 
         bookings = Booking.objects.filter(consultation=consultation).select_related("student")
-        students = [booking.student for booking in bookings]
 
         paginator = self.pagination_class()
-        page = paginator.paginate_queryset(students, request)
+        page = paginator.paginate_queryset(bookings, request)
         serializer = StudentWithMessageSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
