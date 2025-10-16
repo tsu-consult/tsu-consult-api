@@ -6,7 +6,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auth_app.permissions import IsStudent, IsTeacher, IsActive
-from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, ConsultationRequestSubscription
+from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, ConsultationRequestSubscription, \
+    StudentWithMessageSerializer
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
     ConsultationRequestResponseSerializer, ConsultationCreateSerializer, ConsultationUpdateSerializer, \
@@ -131,7 +132,7 @@ class ConsultationStudentsView(ErrorResponseMixin, APIView):
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(students, request)
-        serializer = StudentSerializer(page, many=True)
+        serializer = StudentWithMessageSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
 
