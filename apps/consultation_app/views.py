@@ -6,7 +6,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auth_app.permissions import IsStudent, IsTeacher, IsActive
-from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, ConsultationRequestSubscription
+from apps.consultation_app.models import Consultation, Booking, ConsultationRequest, ConsultationRequestSubscription, \
+    StudentWithMessageSerializer
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
     ConsultationRequestResponseSerializer, ConsultationCreateSerializer, ConsultationUpdateSerializer, \
@@ -127,11 +128,10 @@ class ConsultationStudentsView(ErrorResponseMixin, APIView):
             return self.format_error(request, 403, "Forbidden", "You are not the owner of this consultation.")
 
         bookings = Booking.objects.filter(consultation=consultation).select_related("student")
-        students = [booking.student for booking in bookings]
 
         paginator = self.pagination_class()
-        page = paginator.paginate_queryset(students, request)
-        serializer = StudentSerializer(page, many=True)
+        page = paginator.paginate_queryset(bookings, request)
+        serializer = StudentWithMessageSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
 
