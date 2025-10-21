@@ -11,7 +11,7 @@ from apps.consultation_app.models import Consultation, Booking, ConsultationRequ
 from apps.consultation_app.serializers import PaginatedConsultationsSerializer, ConsultationResponseSerializer, \
     BookingRequestSerializer, BookingResponseSerializer, ConsultationRequestSerializer, \
     ConsultationRequestResponseSerializer, ConsultationCreateSerializer, ConsultationUpdateSerializer, \
-    StudentSerializer, PaginatedStudentsSerializer, ConsultationFromRequestCreateSerializer
+    PaginatedStudentsSerializer, ConsultationFromRequestCreateSerializer
 from apps.notification_app.models import Notification
 from core.mixins import ErrorResponseMixin
 from core.pagination import DefaultPagination
