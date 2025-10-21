@@ -36,7 +36,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 RUN mkdir -p /vol/web/static
 VOLUME /vol/web/static
 
-EXPOSE 8000
+EXPOSE 8001
 
 CMD python manage.py collectstatic --noinput \
     && gunicorn config.wsgi:application --bind 0.0.0.0:8001
