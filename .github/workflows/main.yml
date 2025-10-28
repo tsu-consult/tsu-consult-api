@@ -67,7 +67,7 @@
               docker run -d \
                 --name tsu-consult-api \
                 -p 8001:8001 \
-                --env-file /home/${{ env.DEPLOY_USERNAME }}/tsu-consult.env \
+                --env-file /home/${{ env.DEPLOY_USERNAME }}/tsu-consult/tsu-consult.env \
                 --network ${{ env.DEPLOY_USERNAME }}_tsu-consult_net \
                 -v /home/${{ env.DEPLOY_USERNAME }}/tsu-consult/static:/vol/web/static \
                 ${{ env.DOCKER_IMAGE }}:latest
@@ -86,7 +86,7 @@
               docker run -d \
                 --name tsu-consult-api \
                 -p 8001:8001 \
-                --env-file /home/${{ env.DEPLOY_USERNAME }}/tsu-consult.env \
+                --env-file /home/${{ env.DEPLOY_USERNAME }}/tsu-consult/tsu-consult.env \
                 --network ${{ env.DEPLOY_USERNAME }}_tsu-consult_net \
                 -v /home/${{ env.DEPLOY_USERNAME }}/tsu-consult/static:/vol/web/static \
                 tsu-consult-api-backup
