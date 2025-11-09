@@ -36,6 +36,7 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         STUDENT = "student", "Student"
         TEACHER = "teacher", "Teacher"
+        DEAN = "dean", "Dean"
         ADMIN = "admin", "Admin"
 
     class Status(models.TextChoices):
