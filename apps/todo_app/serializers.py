@@ -11,19 +11,21 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class ToDoCreateSerializer(serializers.ModelSerializer):
-    assignee = serializers.PrimaryKeyRelatedField(
+    assignee_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role='teacher'),
         allow_null=True,
         required=False,
+        write_only=True,
+        source='assignee',
         error_messages={
             'does_not_exist': 'User with id="{pk_value}" not found.',
-            'incorrect_type': 'Invalid type for the assignee field. An integer is expectedUser with id=\"1\" not found..'
+            'incorrect_type': 'Invalid type for the assignee field. An integer is expected.'
         }
     )
 
     class Meta:
         model = ToDo
-        fields = ["title", "description", "deadline", "assignee"]
+        fields = ["title", "description", "deadline", "assignee_id"]
 
     def validate(self, attrs):
         user = self.context["request"].user
@@ -33,9 +35,9 @@ class ToDoCreateSerializer(serializers.ModelSerializer):
         assignee = attrs.get('assignee')
         if assignee is not None:
             if getattr(assignee, 'role', None) != 'teacher':
-                raise serializers.ValidationError({'assignee': 'The performer must be a teacher.'})
+                raise serializers.ValidationError({'assignee_id': 'The performer must be a teacher.'})
             if user.role == 'teacher' and assignee.id != user.id:
-                raise serializers.ValidationError({'assignee': 'Teachers can only assign tasks to themselves.'})
+                raise serializers.ValidationError({'assignee_id': 'Teachers can only assign tasks to themselves.'})
         return attrs
 
     def create(self, validated_data):

@@ -19,3 +19,7 @@ class IsAdmin(BasePermission):
 class IsDean(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated and request.user.role == 'dean')
+
+class IsTeacherOrDean(BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.user.role in ('teacher', 'dean'))

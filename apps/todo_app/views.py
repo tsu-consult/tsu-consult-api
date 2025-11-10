@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth_app.permissions import IsActive
+from apps.auth_app.permissions import IsActive, IsTeacherOrDean
 from apps.notification_app.models import Notification
 from apps.todo_app.serializers import ToDoCreateSerializer, ToDoResponseSerializer
 from apps.todo_app.services import GoogleCalendarService
@@ -14,7 +14,7 @@ from core.serializers import ErrorResponseSerializer
 
 
 class ToDoListCreateView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated, IsActive]
+    permission_classes = [IsAuthenticated, IsActive, IsTeacherOrDean]
 
     @swagger_auto_schema(
         tags=["To Do"],
@@ -32,16 +32,12 @@ class ToDoListCreateView(ErrorResponseMixin, APIView):
         serializer = ToDoCreateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
 
-        user = request.user
-        if user.role not in ('teacher', 'dean'):
-            raise PermissionDenied("Only teachers or the dean can create assignments.")
-
         validated = serializer.validated_data
         assignee = validated.get("assignee")
 
         if assignee:
-            if user.role != 'dean':
-                if getattr(assignee, "id", None) != user.id:
+            if request.user.role != 'dean':
+                if getattr(assignee, "id", None) != request.user.id:
                     raise PermissionDenied("Only the dean can assign tasks to other users.")
 
         todo = serializer.save()
