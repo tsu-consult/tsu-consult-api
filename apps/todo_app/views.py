@@ -1,6 +1,5 @@
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -31,15 +30,6 @@ class ToDoListCreateView(ErrorResponseMixin, APIView):
     def post(self, request):
         serializer = ToDoCreateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-
-        validated = serializer.validated_data
-        assignee = validated.get("assignee")
-
-        if assignee:
-            if request.user.role != 'dean':
-                if getattr(assignee, "id", None) != request.user.id:
-                    raise PermissionDenied("Only the dean can assign tasks to other users.")
-
         todo = serializer.save()
 
         calendar_service = GoogleCalendarService(user=request.user)
