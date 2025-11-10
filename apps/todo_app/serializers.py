@@ -1,6 +1,6 @@
 ﻿from rest_framework import serializers
 
-from apps.todos_app.models import ToDo
+from apps.todo_app.models import ToDo
 from apps.auth_app.models import User
 
 
@@ -14,7 +14,11 @@ class ToDoCreateSerializer(serializers.ModelSerializer):
     assignee = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role='teacher'),
         allow_null=True,
-        required=False
+        required=False,
+        error_messages={
+            'does_not_exist': 'User with id="{pk_value}" not found.',
+            'incorrect_type': 'Invalid type for the assignee field. An integer is expectedUser with id=\"1\" not found..'
+        }
     )
 
     class Meta:
@@ -27,21 +31,23 @@ class ToDoCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Only teachers or the dean can create assignments.')
 
         assignee = attrs.get('assignee')
-        if not assignee and user.role != 'dean':
-            raise serializers.ValidationError('Only the dean can create a task without an assignee.')
-
-        if assignee and user.role != 'dean' and getattr(assignee, 'id', None) != user.id:
-            raise serializers.ValidationError('Only the dean can assign tasks to other users.')
+        if assignee is not None:
+            if getattr(assignee, 'role', None) != 'teacher':
+                raise serializers.ValidationError({'assignee': 'The performer must be a teacher.'})
+            if user.role == 'teacher' and assignee.id != user.id:
+                raise serializers.ValidationError({'assignee': 'Teachers can only assign tasks to themselves.'})
         return attrs
 
     def create(self, validated_data):
         user = self.context["request"].user
+        if getattr(user, 'role', None) == 'teacher' and not validated_data.get('assignee'):
+            validated_data['assignee'] = user
         return ToDo.objects.create(creator=user, **validated_data)
 
 
 class ToDoResponseSerializer(serializers.ModelSerializer):
-    creator = UserSerializer(source="creator", read_only=True)
-    assignee = UserSerializer(source="assignee", read_only=True)
+    creator = UserSerializer(read_only=True)
+    assignee = UserSerializer(read_only=True)
 
     class Meta:
         model = ToDo

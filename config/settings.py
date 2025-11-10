@@ -81,7 +81,7 @@ INSTALLED_APPS = [
     'apps.teacher_app',
     'apps.consultation_app',
     'apps.notification_app',
-    'apps.todos_app',
+    'apps.todo_app',
     'corsheaders',
 ]
 
@@ -186,7 +186,7 @@ DATABASES = {
 }
 
 # Redis
-REDIS_FLAGS_URL = config('REDIS_FLAGS_URL', default='redis://localhost:6379/1')
+REDIS_FLAGS_URL = config('REDIS_FLAGS_URL', default='redis://localhost:6379/2')
 
 # Celery
 CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
@@ -197,7 +197,7 @@ CELERY_RESULT_SERIALIZER = config("CELERY_RESULT_SERIALIZER", default="json")
 CELERY_TIMEZONE = config("CELERY_TIMEZONE", default="Asia/Tomsk")
 
 #Bot
-TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='8220296609:AAGAXg9tQRDUUm0vqwfHN21iPGsOSJAtw7E')
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

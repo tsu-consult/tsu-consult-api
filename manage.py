@@ -9,48 +9,48 @@ from django.db.utils import OperationalError
 
 
 def start_docker_compose():
-    print("Starting docker-compose services...")
+    print("🚀 Starting docker-compose services...")
     subprocess.run(["docker", "compose", "up", "-d"], check=True)
-    print("All services started.")
+    print("✅ All services started.")
 
 def stop_docker_compose():
-    print("Stopping docker-compose services...")
+    print("🛑 Stopping docker-compose services...")
     try:
         subprocess.run(["docker", "compose", "stop"], check=True)
-        print("Services stopped.")
+        print("✅ Services stopped.")
     except subprocess.CalledProcessError:
-        print("Failed to stop services.")
+        print("⚠️ Failed to stop services.")
 
 
 def start_celery():
-    print("Starting Celery worker...")
+    print("⚙️ Starting Celery worker...")
     celery_process = subprocess.Popen(
         ["celery", "-A", "config", "worker", "-l", "info", "--pool=solo"]
     )
-    print(f"Celery worker started (PID: {celery_process.pid})")
+    print(f"✅ Celery worker started (PID: {celery_process.pid})")
     atexit.register(lambda: stop_celery(celery_process))
 
 
 def stop_celery(process):
-    print("Stopping Celery worker...")
+    print("🛑 Stopping Celery worker...")
     try:
         process.terminate()
         process.wait(timeout=5)
-        print("Celery worker stopped.")
+        print("✅ Celery worker stopped.")
     except Exception as e:
-        print(f"Failed to stop Celery: {e}")
+        print(f"⚠️ Failed to stop Celery: {e}")
 
 
 def wait_for_db():
-    print("Waiting for database to become available...")
+    print("⏳ Waiting for database to become available...")
     for i in range(20):
         try:
             connections["default"].cursor()
-            print("Database is ready!")
+            print("✅ Database is ready!")
             return
         except OperationalError:
             time.sleep(1)
-    raise RuntimeError("Database not ready after waiting 20 seconds.")
+    raise RuntimeError("❌ Database not ready after waiting 20 seconds.")
 
 
 def init_superuser():
@@ -67,9 +67,9 @@ def init_superuser():
             email=admin_email,
             password=admin_password
         )
-        print(f"Superuser '{admin_username}' created successfully!")
+        print(f"✅ Superuser '{admin_username}' created successfully!")
     else:
-        print(f"Superuser '{admin_username}' already exists.")
+        print(f"ℹ️ Superuser '{admin_username}' already exists.")
 
 def main():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -84,7 +84,7 @@ def main():
             "Couldn't import Django. Make sure it's installed and available on your PYTHONPATH."
         ) from exc
 
-    print("Setting up Django...")
+    print("💾 Setting up Django...")
     django.setup()
 
     if runserver_related and DEBUG:
@@ -93,10 +93,10 @@ def main():
         wait_for_db()
         start_celery()
 
-    print("Applying migrations automatically...")
+    print("💾 Applying migrations automatically...")
     call_command("migrate", interactive=False)
 
-    print("Checking/creating superuser...")
+    print("💻 Checking/creating superuser...")
     init_superuser()
 
     execute_from_command_line(sys.argv)
