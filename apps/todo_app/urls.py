@@ -1,6 +1,6 @@
 ﻿from django.urls import path
-from apps.todo_app.views import ToDoListCreateView
+from apps.todo_app.views import ToDoCreateView
 
 urlpatterns = [
-    path('', ToDoListCreateView.as_view(), name='todo-create'),
+    path('', ToDoCreateView.as_view(), name='todo-create'),
 ]
