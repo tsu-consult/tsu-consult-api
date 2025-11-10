@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 from apps.auth_app.models import User
 
 
-class ToDoListCreateViewTest(APITestCase):
+class ToDoCreateViewTest(APITestCase):
     def setUp(self):
         self.teacher_user = User.objects.create_user(
             username="teacher",
@@ -52,6 +52,15 @@ class ToDoListCreateViewTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         return response
 
+    def _test_create_todo_without_assignee_success(self, user, mock_create_event, assignee_check):
+        mock_create_event.return_value = "mock_event_id"
+        self.client.force_authenticate(user=user)
+        response = self.client.post(self.url, self.valid_data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["creator"]["id"], user.id)
+        assignee_check(response)
+        mock_create_event.assert_called_once()
+
     @patch("apps.todo_app.services.GoogleCalendarService.create_event")
     def test_teacher_create_todo_for_self_success(self, mock_create_event):
         mock_create_event.return_value = "mock_event_id"
@@ -76,23 +85,17 @@ class ToDoListCreateViewTest(APITestCase):
 
     @patch("apps.todo_app.services.GoogleCalendarService.create_event")
     def test_teacher_create_todo_without_assignee_success(self, mock_create_event):
-        mock_create_event.return_value = "mock_event_id"
-        self.client.force_authenticate(user=self.teacher_user)
-        response = self.client.post(self.url, self.valid_data)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data["creator"]["id"], self.teacher_user.id)
-        self.assertEqual(response.data["assignee"]["id"], self.teacher_user.id)
-        mock_create_event.assert_called_once()
+        def assignee_check(response):
+            self.assertEqual(response.data["assignee"]["id"], self.teacher_user.id)
+
+        self._test_create_todo_without_assignee_success(self.teacher_user, mock_create_event, assignee_check)
 
     @patch("apps.todo_app.services.GoogleCalendarService.create_event")
     def test_dean_create_todo_without_assignee_success(self, mock_create_event):
-        mock_create_event.return_value = "mock_event_id"
-        self.client.force_authenticate(user=self.dean_user)
-        response = self.client.post(self.url, self.valid_data)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data["creator"]["id"], self.dean_user.id)
-        self.assertIsNone(response.data["assignee"])
-        mock_create_event.assert_called_once()
+        def assignee_check(response):
+            self.assertIsNone(response.data["assignee"])
+
+        self._test_create_todo_without_assignee_success(self.dean_user, mock_create_event, assignee_check)
 
     def test_teacher_create_todo_for_other_teacher_fail(self):
         self.client.force_authenticate(user=self.teacher_user)

@@ -12,7 +12,7 @@ from core.mixins import ErrorResponseMixin
 from core.serializers import ErrorResponseSerializer
 
 
-class ToDoListCreateView(ErrorResponseMixin, APIView):
+class ToDoCreateView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsActive, IsTeacherOrDean]
 
     @swagger_auto_schema(
@@ -39,11 +39,9 @@ class ToDoListCreateView(ErrorResponseMixin, APIView):
             Notification.objects.create(
                 user=todo.assignee,
                 title="Новая задача",
-                message=f'Вам назначена задача: "{todo.title}". Чтобы просмотреть детали, перейдите в раздел "📝 Мои задачи".',
+                message=f'Вам назначена задача: "{todo.title}". Чтобы просмотреть детали, перейдите в раздел "📝 Мои '
+                        f'задачи".',
                 type=Notification.Type.TELEGRAM,
             )
 
         return Response(ToDoResponseSerializer(todo).data, status=201)
-
-
-
