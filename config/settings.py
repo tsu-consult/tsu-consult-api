@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     'apps.teacher_app',
     'apps.consultation_app',
     'apps.notification_app',
+    'apps.todos_app',
     'corsheaders',
 ]
 
