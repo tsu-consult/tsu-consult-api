@@ -20,7 +20,7 @@ if settings.DEBUG:
 
 
 def _get_redirect_uri():
-    base_uri = settings.SWAGGER_SETTINGS.get("DEFAULT_API_URL", "http://127.0.0.1:8000/")
+    base_uri = settings.SWAGGER_SETTINGS.get("DEFAULT_API_URL")
     if not base_uri.endswith('/'):
         base_uri += '/'
     return f"{base_uri}profile/calendar/redirect/"
