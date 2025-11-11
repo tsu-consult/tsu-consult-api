@@ -5,6 +5,7 @@ from apps.auth_app.validators import validate_human_name
 
 User = get_user_model()
 
+
 class ProfileResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     username = serializers.CharField()
@@ -24,7 +25,8 @@ class UpdateProfileRequestSerializer(serializers.ModelSerializer):
         model = User
         fields = ['first_name', 'last_name']
 
-    def validate_first_name(self, value):
+    @staticmethod
+    def validate_first_name(value):
         if value:
             try:
                 validate_human_name(value, "first_name")
@@ -32,7 +34,8 @@ class UpdateProfileRequestSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(str(e))
         return value
 
-    def validate_last_name(self, value):
+    @staticmethod
+    def validate_last_name(value):
         if value:
             try:
                 validate_human_name(value, "last_name")
