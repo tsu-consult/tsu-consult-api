@@ -17,7 +17,6 @@ from decouple import config, Csv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -35,7 +34,7 @@ if DEBUG:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
     CORS_ALLOW_ALL_ORIGINS = True
-    
+
     CSRF_TRUSTED_ORIGINS = [
         'http://localhost:8000',
         'http://127.0.0.1:8000',
@@ -62,7 +61,6 @@ else:
 
 # SECURITY
 AUTH_USER_MODEL = 'auth_app.User'
-
 
 # Application definition
 INSTALLED_APPS = [
@@ -112,8 +110,8 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates']
-        ,
+        'DIRS': [BASE_DIR / 'templates'],
+
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -136,7 +134,7 @@ JAZZMIN_SETTINGS = {
 
     "topmenu_links": [
 
-        {"name": "Home",  "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"name": "Home", "url": "admin:index", "permissions": ["auth.view_user"]},
     ],
 
     "icons": {
@@ -151,7 +149,6 @@ JAZZMIN_UI_TWEAKS = {
     "theme": "flatly",
 }
 
-
 # Swagger
 SWAGGER_SETTINGS = {
     'SECURITY_DEFINITIONS': {
@@ -163,14 +160,13 @@ SWAGGER_SETTINGS = {
         }
     },
     'USE_SESSION_AUTH': False,
-    'DEFAULT_MODEL_RENDERING' : 'example',
-    'DISPLAY_OPERATION_ID' : False,
+    'DEFAULT_MODEL_RENDERING': 'example',
+    'DISPLAY_OPERATION_ID': False,
     'DEFAULT_AUTO_SCHEMA_CLASS': 'core.schema.CustomAutoSchema',
-    'OPERATIONS_SORTER' : 'method',
-    'TAGS_SORTER' : 'alpha',
+    'OPERATIONS_SORTER': 'method',
+    'TAGS_SORTER': 'alpha',
     "DEFAULT_API_URL": "http://localhost:8000/" if DEBUG else "https://api.tsu-consult.orexi4.ru/",
 }
-
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
@@ -194,7 +190,6 @@ else:
         }
     }
 
-
 # Redis
 REDIS_FLAGS_URL = config('REDIS_FLAGS_URL', default='redis://localhost:6379/2')
 
@@ -206,7 +201,7 @@ CELERY_TASK_SERIALIZER = config("CELERY_TASK_SERIALIZER", default="json")
 CELERY_RESULT_SERIALIZER = config("CELERY_RESULT_SERIALIZER", default="json")
 CELERY_TIMEZONE = config("CELERY_TIMEZONE", default="Asia/Tomsk")
 
-#Bot
+# Bot
 TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='8220296609:AAGAXg9tQRDUUm0vqwfHN21iPGsOSJAtw7E')
 
 # Password validation
@@ -227,7 +222,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
@@ -238,7 +232,6 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
-
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
