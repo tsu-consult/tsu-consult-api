@@ -47,3 +47,11 @@ class UpdateProfileRequestSerializer(serializers.ModelSerializer):
 class ResubmitTeacherApprovalResponseSerializer(serializers.Serializer):
     message = serializers.CharField(read_only=True)
     approval_id = serializers.IntegerField(read_only=True)
+
+
+class GoogleCalendarInitResponseSerializer(serializers.Serializer):
+    authorization_url = serializers.URLField()
+
+
+class GoogleCalendarRedirectResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()

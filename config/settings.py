@@ -204,6 +204,11 @@ CELERY_TIMEZONE = config("CELERY_TIMEZONE", default="Asia/Tomsk")
 # Bot
 TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='8220296609:AAGAXg9tQRDUUm0vqwfHN21iPGsOSJAtw7E')
 
+# Google Calendar
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+GOOGLE_CLIENT_SECRET = config('GOOGLE_CLIENT_SECRET', default='')
+GOOGLE_PROJECT_ID = config('GOOGLE_PROJECT_ID', default='')
+
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
