@@ -63,7 +63,8 @@ class GoogleCalendarInitView(ErrorResponseMixin, APIView):
         )
         authorization_url, state = flow.authorization_url(
             access_type='offline',
-            include_granted_scopes='true'
+            include_granted_scopes='true',
+            prompt='consent'
         )
 
         cache.set(f"state:{state}", request.user.id, timeout=600)
