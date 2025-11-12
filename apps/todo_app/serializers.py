@@ -10,6 +10,11 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["id", "username", "first_name", "last_name", "phone_number"]
 
 
+class ReminderSerializer(serializers.Serializer):
+    method = serializers.ChoiceField(choices=["popup", "email"])
+    minutes = serializers.IntegerField(min_value=1)
+
+
 class ToDoRequestSerializer(serializers.ModelSerializer):
     assignee_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role='teacher'),
@@ -22,10 +27,11 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
             'incorrect_type': 'Invalid type for the assignee field. An integer is expected.'
         }
     )
+    reminders = ReminderSerializer(many=True, required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = ToDo
-        fields = ["title", "description", "deadline", "assignee_id"]
+        fields = ["title", "description", "deadline", "assignee_id", "reminders"]
 
     def validate(self, attrs):
         user = self.context["request"].user
@@ -41,10 +47,12 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        validated_data.pop('reminders', None)
         user = self.context["request"].user
         if getattr(user, 'role', None) == 'teacher' and not validated_data.get('assignee'):
             validated_data['assignee'] = user
-        return ToDo.objects.create(creator=user, **validated_data)
+        todo = ToDo.objects.create(creator=user, **validated_data)
+        return todo
 
 
 class ToDoResponseSerializer(serializers.ModelSerializer):

@@ -30,10 +30,11 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
     def post(self, request):
         serializer = ToDoRequestSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        reminders = serializer.validated_data.get('reminders', None)
         todo = serializer.save()
 
         calendar_service = GoogleCalendarService(user=request.user)
-        todo.sync_calendar_event(calendar_service)
+        todo.sync_calendar_event(calendar_service, reminders=reminders)
 
         if todo.assignee and todo.assignee_id != todo.creator_id:
             Notification.objects.create(

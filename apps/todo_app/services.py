@@ -38,7 +38,7 @@ class GoogleCalendarService:
         self.calendar_id = created_calendar['id']
         return self.calendar_id
 
-    def create_event(self, todo):
+    def create_event(self, todo, reminders=None):
         if not self.service or not todo.deadline:
             return None
 
@@ -64,6 +64,34 @@ class GoogleCalendarService:
                 'timeZone': 'Asia/Tomsk',
             }
         }
+
+        if reminders is None:
+            event['reminders'] = {
+                'useDefault': False,
+                'overrides': [{'method': 'popup', 'minutes': 30}],
+            }
+        elif isinstance(reminders, list):
+            if not reminders:
+                event['reminders'] = {'useDefault': False, 'overrides': []}
+            else:
+                filtered_overrides = []
+                for r in reminders:
+                    method = r.get('method')
+                    minutes = r.get('minutes')
+                    if method in ('popup', 'email'):
+                        try:
+                            minutes_int = int(minutes)
+                        except (TypeError, ValueError):
+                            continue
+                        if minutes_int > 0:
+                            filtered_overrides.append({'method': method, 'minutes': minutes_int})
+                if filtered_overrides:
+                    event['reminders'] = {
+                        'useDefault': False,
+                        'overrides': filtered_overrides
+                    }
+                else:
+                    event['reminders'] = {'useDefault': False, 'overrides': []}
 
         created_event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
         return created_event.get('id')

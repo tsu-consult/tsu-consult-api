@@ -59,11 +59,14 @@ class ToDo(models.Model):
         return bool(user and user.is_authenticated and
                     (self.creator_id == user.id or getattr(user, 'role', None) == 'admin'))
 
-    def sync_calendar_event(self, calendar_service):
+    def sync_calendar_event(self, calendar_service, reminders=None):
         if not self.deadline:
             return None
         try:
-            event_id = calendar_service.create_event(self)
+            if reminders is None:
+                event_id = calendar_service.create_event(self)
+            else:
+                event_id = calendar_service.create_event(self, reminders=reminders)
             if event_id:
                 self.calendar_event_id = event_id
                 self.save(update_fields=["calendar_event_id"])
