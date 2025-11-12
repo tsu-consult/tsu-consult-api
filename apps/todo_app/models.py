@@ -56,7 +56,8 @@ class ToDo(models.Model):
         )
 
     def is_editable_by(self, user):
-        return bool(user and user.is_authenticated and (self.creator_id == user.id or getattr(user, 'role', None) == 'admin'))
+        return bool(user and user.is_authenticated and
+                    (self.creator_id == user.id or getattr(user, 'role', None) == 'admin'))
 
     def sync_calendar_event(self, calendar_service):
         if not self.deadline:
