@@ -33,13 +33,13 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
         todo = serializer.save()
 
         calendar_service = GoogleCalendarService(user=request.user)
-        event_id = todo.sync_calendar_event(calendar_service)
+        todo.sync_calendar_event(calendar_service)
 
         if todo.assignee and todo.assignee_id != todo.creator_id:
             Notification.objects.create(
                 user=todo.assignee,
                 title="Новая задача",
-                message=f'Вам назначена задача: "{todo.title}". Чтобы просмотреть детали, перейдите в раздел "📝 Мои '
+                message=f'Вам назначена задача: "{todo.title}".\n\nЧтобы просмотреть детали, перейдите в раздел "📝 Мои '
                         f'задачи".',
                 type=Notification.Type.TELEGRAM,
             )
