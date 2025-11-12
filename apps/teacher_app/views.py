@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth_app.permissions import IsStudent
+from apps.auth_app.permissions import IsStudent, IsActive, IsStudentOrDean
 from apps.teacher_app.models import Subscription
 from apps.teacher_app.serializers import TeacherResponseSerializer, PaginatedTeachersSerializer
 from core.mixins import ErrorResponseMixin
@@ -17,7 +17,7 @@ User = get_user_model()
 
 
 class TeacherListView(ErrorResponseMixin, APIView):
-    permission_classes = [IsAuthenticated, IsStudent]
+    permission_classes = [IsAuthenticated, IsActive, IsStudentOrDean]
     pagination_class = DefaultPagination
 
     @swagger_auto_schema(

@@ -10,7 +10,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["id", "username", "first_name", "last_name", "phone_number"]
 
 
-class ToDoCreateSerializer(serializers.ModelSerializer):
+class ToDoRequestSerializer(serializers.ModelSerializer):
     assignee_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role='teacher'),
         allow_null=True,

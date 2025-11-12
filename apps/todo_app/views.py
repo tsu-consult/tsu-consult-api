@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 
 from apps.auth_app.permissions import IsActive, IsTeacherOrDean
 from apps.notification_app.models import Notification
-from apps.todo_app.serializers import ToDoCreateSerializer, ToDoResponseSerializer
+from apps.todo_app.serializers import ToDoRequestSerializer, ToDoResponseSerializer
 from apps.todo_app.services import GoogleCalendarService
 from core.mixins import ErrorResponseMixin
 from core.serializers import ErrorResponseSerializer
@@ -18,7 +18,7 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
     @swagger_auto_schema(
         tags=["To Do"],
         operation_summary="Создание новой задачи",
-        request_body=ToDoCreateSerializer,
+        request_body=ToDoRequestSerializer,
         responses={
             201: openapi.Response(description="Задача создана", schema=ToDoResponseSerializer),
             400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
@@ -28,7 +28,7 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
         },
     )
     def post(self, request):
-        serializer = ToDoCreateSerializer(data=request.data, context={"request": request})
+        serializer = ToDoRequestSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         todo = serializer.save()
 

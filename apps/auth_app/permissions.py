@@ -29,3 +29,8 @@ class IsDean(BasePermission):
 class IsTeacherOrDean(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated and request.user.role in ('teacher', 'dean'))
+
+
+class IsStudentOrDean(BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.user.role in ('student', 'dean'))
