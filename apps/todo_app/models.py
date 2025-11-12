@@ -5,14 +5,14 @@ from django.core.exceptions import ValidationError
 
 class ToDo(models.Model):
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        DONE = "done", "Done"
+        IN_PROGRESS = "in progress", "В процессе"
+        DONE = "done", "Выполнено"
 
     id = models.AutoField(primary_key=True)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     deadline = models.DateTimeField(null=True, blank=True)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.IN_PROGRESS)
 
     creator = models.ForeignKey(
         settings.AUTH_USER_MODEL,

@@ -18,7 +18,7 @@ class ToDoCreateSerializer(serializers.ModelSerializer):
         write_only=True,
         source='assignee',
         error_messages={
-            'does_not_exist': 'User with id="{pk_value}" not found.',
+            'does_not_exist': 'User with id={pk_value} not found.',
             'incorrect_type': 'Invalid type for the assignee field. An integer is expected.'
         }
     )
