@@ -354,6 +354,7 @@ class GoogleCalendarViewIntegrationTests(APITestCase):
         from apps.auth_app.models import User as UserModel
         dean = UserModel.objects.create_user(
             username="dean3",
+            email="dean3@example.com",
             password="pwd",
             role=UserModel.Role.DEAN,
             status=UserModel.Status.ACTIVE,
