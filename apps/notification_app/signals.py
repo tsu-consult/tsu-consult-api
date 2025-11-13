@@ -14,6 +14,7 @@ def trigger_notification_send(sender, instance, created, **kwargs):
     if created and instance.status == Notification.Status.PENDING:
         send_notification_task.delay(instance.id)
 
+
 @receiver(post_save, sender=TeacherApproval)
 def notify_teacher_on_approval_status(sender, instance: TeacherApproval, created, **kwargs):
     if created:
@@ -29,7 +30,7 @@ def notify_teacher_on_approval_status(sender, instance: TeacherApproval, created
             title = "Заявка отклонена"
             reason_text = f"\n\n<b>Причина:</b> {instance.reason}" if instance.reason else ""
             message = f"К сожалению, ваша заявка на подтверждение преподавателя была отклонена.{reason_text}"
-        
+
         Notification.objects.create(
             user=user,
             title=title,

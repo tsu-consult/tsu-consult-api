@@ -2,6 +2,8 @@
 
 from apps.todo_app.models import ToDo
 from apps.auth_app.models import User
+from apps.profile_app.models import GoogleToken
+from apps.todo_app.services import FALLBACK_ALLOWED_MINUTES
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -44,6 +46,32 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'assignee_id': 'The performer must be a teacher.'})
             if user.role == 'teacher' and assignee.id != user.id:
                 raise serializers.ValidationError({'assignee_id': 'Teachers can only assign tasks to themselves.'})
+
+        reminders = attrs.get('reminders')
+        if reminders and not assignee and user.role != 'teacher':
+            raise serializers.ValidationError({'reminders': 'Reminders require an assignee (teacher). Dean drafts '
+                                                            'cannot have reminders.'})
+
+        calendar_user = assignee or user
+        has_calendar = GoogleToken.objects.filter(user=calendar_user).exists()
+        if reminders and getattr(calendar_user, 'role', None) != 'teacher':
+            raise serializers.ValidationError({'reminders': 'Only a teacher can have reminders.'})
+
+        if not has_calendar and reminders:
+            allowed_list_str = ", ".join(str(m) for m in sorted(FALLBACK_ALLOWED_MINUTES))
+            for idx, r in enumerate(reminders, start=1):
+                method = r.get('method')
+                if method != 'popup':
+                    raise serializers.ValidationError({'reminders': f'Only method="popup" is allowed for Telegram '
+                                                                    f'reminders (item #{idx}).'})
+                minutes = r.get('minutes')
+                try:
+                    minutes_int = int(minutes)
+                except (TypeError, ValueError):
+                    raise serializers.ValidationError({'reminders': f'Invalid minutes value at item #{idx}.'})
+                if minutes_int not in FALLBACK_ALLOWED_MINUTES:
+                    raise serializers.ValidationError({'reminders': f'Minutes must be one of: {allowed_list_str} '
+                                                                    f'(item #{idx}).'})
         return attrs
 
     def create(self, validated_data):
