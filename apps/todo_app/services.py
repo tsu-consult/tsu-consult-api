@@ -48,9 +48,17 @@ class GoogleCalendarService:
         if not self.calendar_id:
             return None
 
-        description = todo.description
-        if todo.creator != self.user:
-            description += f'\n\nАвтор: {todo.creator.get_full_name()}'
+        base_description = (todo.description or '').strip()
+        description = base_description
+
+        creator_role = getattr(todo.creator, 'role', None)
+        if creator_role != 'teacher':
+            full_name = (todo.creator.get_full_name() or '').strip()
+            if not full_name:
+                full_name = (getattr(todo.creator, 'username', '') or getattr(todo.creator, 'email', '') or '').strip()
+            if full_name:
+                author_line = f'Автор: {full_name}'
+                description = f'{base_description}\n\n{author_line}' if base_description else author_line
 
         event = {
             'summary': f'[{todo.get_status_display()}] {todo.title} — To Do',
@@ -88,7 +96,7 @@ class GoogleCalendarService:
                 if filtered_overrides:
                     event['reminders'] = {
                         'useDefault': False,
-                        'overrides': filtered_overrides
+                        'overrides': filtered_overrides[:5]
                     }
                 else:
                     event['reminders'] = {'useDefault': False, 'overrides': []}
