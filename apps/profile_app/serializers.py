@@ -55,3 +55,7 @@ class GoogleCalendarInitResponseSerializer(serializers.Serializer):
 
 class GoogleCalendarRedirectResponseSerializer(serializers.Serializer):
     status = serializers.CharField()
+
+
+class GoogleCalendarDisconnectResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()

@@ -7,12 +7,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+import json
+import requests
 
 from config import settings
 from core.mixins import ErrorResponseMixin
 from core.serializers import ErrorResponseSerializer
 from .models import GoogleToken
 from .serializers import GoogleCalendarInitResponseSerializer, GoogleCalendarRedirectResponseSerializer
+from .serializers import GoogleCalendarDisconnectResponseSerializer
 from ..auth_app.permissions import IsActive
 
 if settings.DEBUG:
@@ -107,3 +110,43 @@ class GoogleCalendarRedirectView(APIView):
             defaults={'credentials': credentials.to_json()}
         )
         return Response({'status': 'Ok'})
+
+
+class GoogleCalendarDisconnectView(ErrorResponseMixin, APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, IsActive]
+
+    @swagger_auto_schema(
+        tags=['Profile'],
+        operation_summary="Отвязка интеграции Google Calendar",
+        operation_description="Отзывает токен у Google и удаляет сохраненные OAuth-токены Google Calendar текущего "
+                              "пользователя.",
+        responses={
+            200: openapi.Response(description="Интеграция успешно удалена",
+                                  schema=GoogleCalendarDisconnectResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Интеграция не найдена", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        }
+    )
+    def delete(self, request):
+        token_obj = getattr(request.user, 'google_token', None)
+        if not token_obj:
+            return Response({'error': 'Google Calendar integration not found'}, status=404)
+
+        revoked_success = False
+        try:
+            creds_dict = json.loads(token_obj.credentials)
+            token_to_revoke = (creds_dict.get('refresh_token') or creds_dict.get('token')
+                               or creds_dict.get('access_token'))
+            if token_to_revoke:
+                resp = requests.post('https://oauth2.googleapis.com/revoke', params={
+                    'token': token_to_revoke
+                }, timeout=5)
+                if resp.status_code == 200:
+                    revoked_success = True
+        except Exception:
+            revoked_success = False
+
+        token_obj.delete()
+        return Response({'status': revoked_success})
