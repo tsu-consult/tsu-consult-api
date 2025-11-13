@@ -80,7 +80,7 @@ class GoogleCalendarServiceUnitTests(TestCase):
         self.assertIn("reminders", body)
         self.assertFalse(body["reminders"]["useDefault"])
         self.assertEqual(len(body["reminders"]["overrides"]), 1)
-        self.assertEqual(body["reminders"]["overrides"][0]["minutes"], 30)
+        self.assertEqual(body["reminders"]["overrides"][0]["minutes"], 15)
         self.assertEqual(body["summary"], f"[{todo.get_status_display()}] {todo.title} — To Do")
 
     @patch("apps.todo_app.services.build")
@@ -239,14 +239,14 @@ class GoogleCalendarServiceUnitTests(TestCase):
             {"method": "popup", "minutes": 15},
             {"method": "email", "minutes": 20},
             {"method": "popup", "minutes": 25},
-            {"method": "email", "minutes": 30},
+            {"method": "email", "minutes": 15},
         ]
         eid = service.create_event(todo, reminders=reminders)
         self.assertEqual(eid, "event-5max")
         body = events_obj.insert.call_args.kwargs["body"]
         overrides = body["reminders"]["overrides"]
         self.assertEqual(len(overrides), 5)
-        self.assertNotIn({"method": "email", "minutes": 30}, overrides)
+        self.assertNotIn({"method": "email", "minutes": 15}, overrides)
 
 
 @override_settings(NOTIFICATIONS_DELIVERY_ENABLED=False)
@@ -337,7 +337,7 @@ class GoogleCalendarViewIntegrationTests(APITestCase):
                 {"method": "popup", "minutes": 15},
                 {"method": "email", "minutes": 20},
                 {"method": "popup", "minutes": 25},
-                {"method": "email", "minutes": 30},
+                {"method": "email", "minutes": 15},
             ]
         }
         resp = self.client.post(self.url, payload, format='json')
@@ -347,7 +347,7 @@ class GoogleCalendarViewIntegrationTests(APITestCase):
         body = events_obj.insert.call_args.kwargs["body"]
         overrides = body["reminders"]["overrides"]
         self.assertEqual(len(overrides), 5)
-        self.assertNotIn({"method": "email", "minutes": 30}, overrides)
+        self.assertNotIn({"method": "email", "minutes": 15}, overrides)
 
     @patch("apps.todo_app.services.build")
     def test_dean_creates_task_for_teacher_event_in_assignee_calendar(self, mock_build):

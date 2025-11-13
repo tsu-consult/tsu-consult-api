@@ -1,10 +1,88 @@
 ﻿import json
+from datetime import timedelta
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.exceptions import RefreshError
+from django.utils import timezone
 
 from apps.profile_app.models import GoogleToken
+from apps.notification_app.models import Notification
+from apps.notification_app.tasks import send_notification_task
+
+
+FALLBACK_ALLOWED_MINUTES = {15, 30, 60, 1440}
+
+
+def humanize_minutes(m: int) -> str:
+    if m < 60:
+        return f"{m} мин"
+    if m % 60 == 0 and m < 1440:
+        h = m // 60
+        if h == 1:
+            return "1 час"
+        if 2 <= h <= 4:
+            return f"{h} часа"
+        return f"{h} часов"
+    if m % 1440 == 0 and m < 10080:
+        d = m // 1440
+        if d == 1:
+            return "1 день"
+        if 2 <= d <= 4:
+            return f"{d} дня"
+        return f"{d} дней"
+    if m % 10080 == 0:
+        w = m // 10080
+        if w == 1:
+            return "1 неделя"
+        if 2 <= w <= 4:
+            return f"{w} недели"
+        return f"{w} недель"
+    if 60 <= m < 1440:
+        h = m // 60
+        return f"~{h} ч"
+    if 1440 <= m < 10080:
+        d = m // 1440
+        return f"~{d} дн"
+    w = m // 10080
+    return f"~{w} нед"
+
+
+def schedule_fallback_reminders(todo, reminders):
+    if not reminders or not todo.deadline:
+        return
+
+    limited = reminders[:5] if isinstance(reminders, list) else []
+    target_user = todo.assignee or todo.creator
+    now = timezone.now()
+
+    for r in limited:
+        minutes = r.get('minutes')
+        try:
+            minutes_int = int(minutes)
+        except (TypeError, ValueError):
+            continue
+        if minutes_int <= 0 or minutes_int not in FALLBACK_ALLOWED_MINUTES:
+            continue
+        notify_at = todo.deadline - timedelta(minutes=minutes_int)
+        if notify_at <= now:
+            notification = Notification.objects.create(
+                user=target_user,
+                title="Напоминание о задаче",
+                message=f'Задача "{todo.title}" подходит к дедлайну.',
+                type=Notification.Type.TELEGRAM,
+            )
+            send_notification_task.delay(notification.id)
+            continue
+
+        interval_str = humanize_minutes(minutes_int)
+        notification = Notification.objects.create(
+            user=target_user,
+            title="Напоминание о задаче",
+            message=f'За {interval_str} до дедлайна задачи "{todo.title}" будет отправлено это напоминание.',
+            type=Notification.Type.TELEGRAM,
+        )
+        send_notification_task.apply_async((notification.id,), eta=notify_at)
 
 
 class GoogleCalendarService:
@@ -88,7 +166,7 @@ class GoogleCalendarService:
         if reminders is None:
             event['reminders'] = {
                 'useDefault': False,
-                'overrides': [{'method': 'popup', 'minutes': 30}],
+                'overrides': [{'method': 'popup', 'minutes': 15}],
             }
         elif isinstance(reminders, list):
             if not reminders:

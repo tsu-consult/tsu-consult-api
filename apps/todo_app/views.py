@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from apps.auth_app.permissions import IsActive, IsTeacherOrDean
 from apps.notification_app.models import Notification
 from apps.todo_app.serializers import ToDoRequestSerializer, ToDoResponseSerializer
-from apps.todo_app.services import GoogleCalendarService
+from apps.todo_app.services import GoogleCalendarService, schedule_fallback_reminders
 from core.mixins import ErrorResponseMixin
 from core.serializers import ErrorResponseSerializer
 
@@ -45,5 +45,8 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
                         f'задачи".',
                 type=Notification.Type.TELEGRAM,
             )
+
+        if not calendar_service.service and todo.deadline and reminders:
+            schedule_fallback_reminders(todo, reminders)
 
         return Response(ToDoResponseSerializer(todo).data, status=201)
