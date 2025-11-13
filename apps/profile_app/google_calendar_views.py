@@ -1,5 +1,6 @@
 ﻿import os
 from django.core.cache import cache
+from django.shortcuts import redirect
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from google_auth_oauthlib.flow import Flow
@@ -16,7 +17,7 @@ from core.serializers import ErrorResponseSerializer
 from .models import GoogleToken
 from .serializers import GoogleCalendarInitResponseSerializer, GoogleCalendarRedirectResponseSerializer
 from .serializers import GoogleCalendarDisconnectResponseSerializer
-from ..auth_app.permissions import IsActive
+from ..auth_app.permissions import IsActive, IsTeacher
 
 if settings.DEBUG:
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -44,7 +45,7 @@ def _get_client_config():
 
 class GoogleCalendarInitView(ErrorResponseMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsActive]
+    permission_classes = [IsAuthenticated, IsActive, IsTeacher]
 
     @swagger_auto_schema(
         tags=['Profile'],
@@ -54,6 +55,7 @@ class GoogleCalendarInitView(ErrorResponseMixin, APIView):
         responses={
             200: openapi.Response(description="URL для авторизации", schema=GoogleCalendarInitResponseSerializer),
             401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
             500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
         }
     )
@@ -75,7 +77,6 @@ class GoogleCalendarInitView(ErrorResponseMixin, APIView):
 
 
 class GoogleCalendarRedirectView(APIView):
-
     @swagger_auto_schema(
         tags=['Profile'],
         operation_summary="Обработка редиректа от Google Calendar",
@@ -109,7 +110,11 @@ class GoogleCalendarRedirectView(APIView):
             user_id=user_id,
             defaults={'credentials': credentials.to_json()}
         )
-        return Response({'status': 'Ok'})
+
+        telegram_bot_username = "tsu_consult_dev_bot" if settings.DEBUG else "tsuconsult_bot"
+        redirect_url = f"https://t.me/{telegram_bot_username}?start=google_success"
+
+        return redirect(redirect_url)
 
 
 class GoogleCalendarDisconnectView(ErrorResponseMixin, APIView):
