@@ -2,6 +2,7 @@
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from google.auth.exceptions import RefreshError
 
 from apps.profile_app.models import GoogleToken
 
@@ -20,23 +21,34 @@ class GoogleCalendarService:
             except GoogleToken.DoesNotExist:
                 self.service = None
 
+    def _handle_refresh_error(self):
+        if self.user:
+            GoogleToken.objects.filter(user=self.user).delete()
+        self.service = None
+        self.calendar_id = None
+
     def _get_or_create_calendar(self):
         if not self.service:
             return None
+        try:
+            calendar_list = self.service.calendarList().list().execute()
+            for calendar_list_entry in calendar_list.get('items', []):
+                if calendar_list_entry['summary'] == 'TSU Consult':
+                    self.calendar_id = calendar_list_entry['id']
+                    return self.calendar_id
 
-        calendar_list = self.service.calendarList().list().execute()
-        for calendar_list_entry in calendar_list.get('items', []):
-            if calendar_list_entry['summary'] == 'TSU Consult':
-                self.calendar_id = calendar_list_entry['id']
-                return self.calendar_id
-
-        calendar = {
-            'summary': 'TSU Consult',
-            'timeZone': 'Asia/Tomsk',
-        }
-        created_calendar = self.service.calendars().insert(body=calendar).execute()
-        self.calendar_id = created_calendar['id']
-        return self.calendar_id
+            calendar = {
+                'summary': 'TSU Consult',
+                'timeZone': 'Asia/Tomsk',
+            }
+            created_calendar = self.service.calendars().insert(body=calendar).execute()
+            self.calendar_id = created_calendar['id']
+            return self.calendar_id
+        except RefreshError:
+            self._handle_refresh_error()
+            return None
+        except Exception:
+            return None
 
     def create_event(self, todo, reminders=None):
         if not self.service or not todo.deadline:
@@ -101,8 +113,14 @@ class GoogleCalendarService:
                 else:
                     event['reminders'] = {'useDefault': False, 'overrides': []}
 
-        created_event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
-        return created_event.get('id')
+        try:
+            created_event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
+            return created_event.get('id')
+        except RefreshError:
+            self._handle_refresh_error()
+            return None
+        except Exception:
+            return None
 
     def delete_event(self):
         return True
