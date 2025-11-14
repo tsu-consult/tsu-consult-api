@@ -1,6 +1,7 @@
 ﻿from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
+from django.utils import timezone
 
 from apps.auth_app.models import TeacherApproval
 from apps.notification_app.models import Notification
@@ -12,6 +13,8 @@ def trigger_notification_send(sender, instance, created, **kwargs):
     if not getattr(settings, "NOTIFICATIONS_DELIVERY_ENABLED", True):
         return
     if created and instance.status == Notification.Status.PENDING:
+        if instance.scheduled_for and instance.scheduled_for > timezone.now():
+            return
         send_notification_task.delay(instance.id)
 
 

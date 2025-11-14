@@ -1,5 +1,6 @@
 ﻿import json
 from datetime import timedelta
+import math
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -14,38 +15,42 @@ from apps.notification_app.tasks import send_notification_task
 FALLBACK_ALLOWED_MINUTES = {15, 30, 60, 1440}
 
 
+def _russian_plural(n: int, forms: tuple[str, str, str]) -> str:
+    n_abs = abs(n)
+    last_two = n_abs % 100
+    last = n_abs % 10
+    if 11 <= last_two <= 14:
+        return forms[2]
+    if last == 1:
+        return forms[0]
+    if 2 <= last <= 4:
+        return forms[1]
+    return forms[2]
+
+
 def humanize_minutes(m: int) -> str:
-    if m < 60:
-        return f"{m} мин"
-    if m % 60 == 0 and m < 1440:
-        h = m // 60
-        if h == 1:
-            return "1 час"
-        if 2 <= h <= 4:
-            return f"{h} часа"
-        return f"{h} часов"
-    if m % 1440 == 0 and m < 10080:
-        d = m // 1440
-        if d == 1:
-            return "1 день"
-        if 2 <= d <= 4:
-            return f"{d} дня"
-        return f"{d} дней"
+    if m <= 0:
+        return "0 минут"
+
     if m % 10080 == 0:
         w = m // 10080
         if w == 1:
-            return "1 неделя"
-        if 2 <= w <= 4:
-            return f"{w} недели"
-        return f"{w} недель"
-    if 60 <= m < 1440:
-        h = m // 60
-        return f"~{h} ч"
-    if 1440 <= m < 10080:
+            return "неделю"
+        return f"{w} " + _russian_plural(w, ("неделю", "недели", "недель"))
+
+    if m % 1440 == 0:
         d = m // 1440
-        return f"~{d} дн"
-    w = m // 10080
-    return f"~{w} нед"
+        if d == 1:
+            return "сутки"
+        return f"{d} суток"
+
+    if m % 60 == 0:
+        h = m // 60
+        form = _russian_plural(h, ("час", "часа", "часов"))
+        return f"{h} {form}"
+
+    form = _russian_plural(m, ("минуту", "минуты", "минут"))
+    return f"{m} {form}"
 
 
 def schedule_fallback_reminders(todo, reminders):
@@ -75,23 +80,41 @@ def schedule_fallback_reminders(todo, reminders):
     for minutes_int in unique_reminders:
         notify_at = todo.deadline - timedelta(minutes=minutes_int)
         if notify_at <= now:
-            notification = Notification.objects.create(
+            remaining_seconds = (todo.deadline - now).total_seconds()
+            if remaining_seconds > 0:
+                remaining_minutes = int(math.ceil(remaining_seconds / 60))
+                interval_str = humanize_minutes(remaining_minutes)
+                message = f'Через {interval_str} наступает дедлайн задачи "{todo.title}".'
+            else:
+                message = f'Дедлайн задачи "{todo.title}" наступил.'
+
+            n = Notification.objects.create(
                 user=target_user,
                 title="Напоминание о задаче",
-                message=f'Задача "{todo.title}" подходит к дедлайну.',
+                message=message,
                 type=Notification.Type.TELEGRAM,
+                status=Notification.Status.PENDING,
+                scheduled_for=None,
             )
-            send_notification_task.delay(notification.id)
+            try:
+                send_notification_task.delay(n.id)
+            except Exception:
+                pass
             continue
 
         interval_str = humanize_minutes(minutes_int)
-        notification = Notification.objects.create(
+        n = Notification.objects.create(
             user=target_user,
             title="Напоминание о задаче",
-            message=f'За {interval_str} до дедлайна задачи "{todo.title}" будет отправлено это напоминание.',
+            message=f'Через {interval_str} наступает дедлайн задачи "{todo.title}".',
             type=Notification.Type.TELEGRAM,
+            status=Notification.Status.PENDING,
+            scheduled_for=notify_at,
         )
-        send_notification_task.apply_async((notification.id,), eta=notify_at)
+        try:
+            send_notification_task.apply_async(args=[n.id], eta=notify_at)
+        except Exception:
+            pass
 
 
 class GoogleCalendarService:
