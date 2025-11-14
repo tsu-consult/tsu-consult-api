@@ -17,7 +17,7 @@ from core.serializers import ErrorResponseSerializer
 from .models import GoogleToken
 from .serializers import GoogleCalendarInitResponseSerializer, GoogleCalendarRedirectResponseSerializer
 from .serializers import GoogleCalendarDisconnectResponseSerializer
-from ..auth_app.permissions import IsActive, IsTeacher
+from ..auth_app.permissions import IsActive, IsTeacherOrDean
 
 if settings.DEBUG:
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -45,7 +45,7 @@ def _get_client_config():
 
 class GoogleCalendarInitView(ErrorResponseMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsActive, IsTeacher]
+    permission_classes = [IsAuthenticated, IsActive, IsTeacherOrDean]
 
     @swagger_auto_schema(
         tags=['Profile'],
