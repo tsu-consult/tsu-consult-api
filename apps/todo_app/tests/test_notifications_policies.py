@@ -159,7 +159,7 @@ class NotificationsPolicyTests(APITestCase):
 
         self.assertEqual(Notification.objects.filter(user=self.dean).count(), 0)
         reminders_notifications = Notification.objects.filter(title="Напоминание о задаче", user=self.teacher)
-        self.assertEqual(reminders_notifications.count(), 5)
+        self.assertEqual(reminders_notifications.count(), 4)
         self.assertGreaterEqual(mock_delay.call_count + mock_apply_async.call_count, 1)
 
     def test_dean_has_calendar_but_teacher_has_not_event_not_created(self):

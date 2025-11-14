@@ -52,11 +52,12 @@ def schedule_fallback_reminders(todo, reminders):
     if not reminders or not todo.deadline:
         return
 
-    limited = reminders[:5] if isinstance(reminders, list) else []
     target_user = todo.assignee or todo.creator
     now = timezone.now()
 
-    for r in limited:
+    seen_minutes = set()
+    unique_reminders = []
+    for r in reminders if isinstance(reminders, list) else []:
         minutes = r.get('minutes')
         try:
             minutes_int = int(minutes)
@@ -64,6 +65,14 @@ def schedule_fallback_reminders(todo, reminders):
             continue
         if minutes_int <= 0 or minutes_int not in FALLBACK_ALLOWED_MINUTES:
             continue
+        if minutes_int in seen_minutes:
+            continue
+        seen_minutes.add(minutes_int)
+        unique_reminders.append(minutes_int)
+        if len(unique_reminders) >= 5:
+            break
+
+    for minutes_int in unique_reminders:
         notify_at = todo.deadline - timedelta(minutes=minutes_int)
         if notify_at <= now:
             notification = Notification.objects.create(
@@ -173,6 +182,7 @@ class GoogleCalendarService:
                 event['reminders'] = {'useDefault': False, 'overrides': []}
             else:
                 filtered_overrides = []
+                seen_pairs = set()
                 for r in reminders:
                     method = r.get('method')
                     minutes = r.get('minutes')
@@ -182,6 +192,10 @@ class GoogleCalendarService:
                         except (TypeError, ValueError):
                             continue
                         if minutes_int > 0:
+                            pair = (method, minutes_int)
+                            if pair in seen_pairs:
+                                continue
+                            seen_pairs.add(pair)
                             filtered_overrides.append({'method': method, 'minutes': minutes_int})
                 if filtered_overrides:
                     event['reminders'] = {

@@ -248,6 +248,32 @@ class GoogleCalendarServiceUnitTests(TestCase):
         self.assertEqual(len(overrides), 5)
         self.assertNotIn({"method": "email", "minutes": 15}, overrides)
 
+    @patch("apps.todo_app.services.build")
+    def test_create_event_deduplicates_overrides_pairs(self, mock_build):
+        mock_service, events_obj, _, _ = self._build_mock_service(calendar_items=[{"summary": "TSU Consult", "id": "cal-dup"}])
+        mock_build.return_value = mock_service
+
+        service = GoogleCalendarService(user=self.teacher)
+        todo = ToDo.objects.create(
+            title="TaskDup", description="DescDup", deadline=self.deadline, creator=self.teacher, assignee=self.teacher
+        )
+        reminders = [
+            {"method": "popup", "minutes": 15},
+            {"method": "popup", "minutes": 15},
+            {"method": "email", "minutes": 60},
+            {"method": "email", "minutes": 60},
+            {"method": "popup", "minutes": 30},
+            {"method": "sms", "minutes": 45},
+        ]
+        event_id = service.create_event(todo, reminders=reminders)
+        self.assertEqual(event_id, "event-123")
+        body = events_obj.insert.call_args.kwargs["body"]
+        overrides = body["reminders"]["overrides"]
+        self.assertEqual(len(overrides), 3)
+        self.assertIn({"method": "popup", "minutes": 15}, overrides)
+        self.assertIn({"method": "email", "minutes": 60}, overrides)
+        self.assertIn({"method": "popup", "minutes": 30}, overrides)
+
 
 @override_settings(NOTIFICATIONS_DELIVERY_ENABLED=False)
 class GoogleCalendarViewIntegrationTests(APITestCase):
