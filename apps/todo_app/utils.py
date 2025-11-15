@@ -12,7 +12,8 @@ MAX_REMINDERS = 5
 
 
 def _normalize_and_sort_reminders(reminders: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """Convert reminders to uniform dicts with int minutes, filter invalid and sort by minutes ascending.
+    """
+    Convert reminders to uniform dicts with int minutes, filter invalid and sort by minutes ascending.
 
     :param reminders: Input reminders (may contain string minutes or invalid entries).
     :type reminders: Optional[List[Dict[str, Any]]]
@@ -28,9 +29,13 @@ def _normalize_and_sort_reminders(reminders: Optional[List[Dict[str, Any]]]) -> 
             continue
         method = r.get('method')
         minutes = r.get('minutes')
+        if not isinstance(method, str) or method not in ('popup', 'email'):
+            continue
         try:
             minutes_int = int(minutes)
         except Exception:
+            continue
+        if minutes_int <= 0:
             continue
         pair = (method, minutes_int)
         if pair in seen:
@@ -45,7 +50,8 @@ def _normalize_and_sort_reminders(reminders: Optional[List[Dict[str, Any]]]) -> 
 
 def merge_reminders(r1: Optional[List[Dict[str, Any]]],
                     r2: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
-    """Merge two reminders lists removing duplicates by (method, minutes).
+    """
+    Merge two reminders lists removing duplicates by (method, minutes).
 
     :param r1: First reminders list or ``None``.
     :type r1: Optional[List[Dict[str, Any]]]
@@ -65,7 +71,8 @@ def merge_reminders(r1: Optional[List[Dict[str, Any]]],
 
 def resolve_assignee_reminders(initial_data: Optional[Dict[str, Any]],
                                provided_reminders: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """Return reminders for assignee.
+    """
+    Return reminders for assignee.
 
     If the request payload contains the `reminders` field, its value is used (``None`` means an explicit
     empty list). Otherwise, the default teacher reminders are returned.
@@ -87,7 +94,8 @@ def resolve_assignee_reminders(initial_data: Optional[Dict[str, Any]],
 def resolve_creator_reminders(initial_data: Optional[Dict[str, Any]],
                               creator_provided_reminders: Optional[List[Dict[str, Any]]],
                               request_user) -> Optional[List[Dict[str, Any]]]:
-    """Determine reminders for the creator.
+    """
+    Determine reminders for the creator.
 
     If the request payload contains the `creator_reminders` field, its value is returned (``None`` means an
     explicit empty list). Otherwise, role-based defaults are returned: dean -> ``DEAN_DEFAULT_REMINDERS``,
@@ -120,7 +128,8 @@ def sync_and_handle_event(todo: Any,
                           reminders: Optional[List[Dict[str, Any]]],
                           target_user: Any,
                           for_creator: bool = False) -> Optional[str]:
-    """Sync a ToDo event to a calendar and schedule fallback reminders on failure.
+    """
+    Sync a ToDo event to a calendar and schedule fallback reminders on failure.
 
     :param todo: ToDo instance to sync. Must have a ``deadline`` attribute.
     :type todo: apps.todo_app.models.ToDo
