@@ -51,6 +51,13 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
         if todo.assignee and todo.assignee.id == request.user.id:
             merged = merge_reminders(assignee_reminders, creator_reminders)
             sync_and_handle_event(todo, calendar_service, merged, target_user=request.user, for_creator=False)
+        else:
+            sync_and_handle_event(todo, calendar_service, assignee_reminders,
+                                  target_user=todo.assignee, for_creator=False)
+
+            creator_calendar_service = GoogleCalendarService(user=request.user)
+            sync_and_handle_event(todo, creator_calendar_service, creator_reminders,
+                                  target_user=request.user, for_creator=True)
 
             Notification.objects.create(
                 user=todo.assignee,
@@ -59,12 +66,5 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
                         f'задачи".',
                 type=Notification.Type.TELEGRAM,
             )
-        else:
-            sync_and_handle_event(todo, calendar_service, assignee_reminders,
-                                  target_user=todo.assignee, for_creator=False)
-
-            creator_calendar_service = GoogleCalendarService(user=request.user)
-            sync_and_handle_event(todo, creator_calendar_service, creator_reminders,
-                                  target_user=request.user, for_creator=True)
 
         return Response(ToDoResponseSerializer(todo).data, status=201)
