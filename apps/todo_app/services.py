@@ -1,18 +1,26 @@
 ﻿import json
-from datetime import timedelta
+import logging
 import math
+from datetime import timedelta
+from typing import Optional, List, Dict, Any
 
+from django.utils import timezone
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from google.auth.exceptions import RefreshError
-from django.utils import timezone
 
-from apps.profile_app.models import GoogleToken
 from apps.notification_app.models import Notification
-from apps.notification_app.tasks import send_notification_task
+from apps.profile_app.models import GoogleToken
+from apps.todo_app.models import ToDo
+
+logger = logging.getLogger(__name__)
 
 
 FALLBACK_ALLOWED_MINUTES = {15, 30, 60, 1440}
+
+
+class GoogleCalendarAuthRequired(Exception):
+    pass
 
 
 def _russian_plural(n: int, forms: tuple[str, str, str]) -> str:
@@ -53,11 +61,15 @@ def humanize_minutes(m: int) -> str:
     return f"{m} {form}"
 
 
-def schedule_fallback_reminders(todo, reminders):
+def schedule_fallback_reminders(todo, reminders, target_user=None):
     if not reminders or not todo.deadline:
         return
 
-    target_user = todo.assignee or todo.creator
+    from apps.notification_app.tasks import send_notification_task
+    logger.debug("schedule_fallback_reminders called for todo %s, target_user=%s",
+                 getattr(todo, 'id', None), getattr(target_user, 'id', None) if target_user else None)
+
+    target_user = target_user or todo.assignee or todo.creator
     now = timezone.now()
 
     seen_minutes = set()
@@ -98,8 +110,9 @@ def schedule_fallback_reminders(todo, reminders):
             )
             try:
                 send_notification_task.delay(n.id)
-            except Exception:
-                pass
+                logger.info("Scheduled immediate notification %s for todo %s", n.id, todo.id)
+            except Exception as e:
+                logger.exception("Failed scheduling immediate notification %s for todo %s: %s", n.id, todo.id, e)
             continue
 
         interval_str = humanize_minutes(minutes_int)
@@ -113,8 +126,9 @@ def schedule_fallback_reminders(todo, reminders):
         )
         try:
             send_notification_task.apply_async(args=[n.id], eta=notify_at)
-        except Exception:
-            pass
+            logger.info("Scheduled deferred notification %s for todo %s at %s", n.id, todo.id, notify_at)
+        except Exception as e:
+            logger.exception("Failed scheduling deferred notification %s for todo %s: %s", n.id, todo.id, e)
 
 
 class GoogleCalendarService:
@@ -136,6 +150,7 @@ class GoogleCalendarService:
             GoogleToken.objects.filter(user=self.user).delete()
         self.service = None
         self.calendar_id = None
+        raise GoogleCalendarAuthRequired()
 
     def _get_or_create_calendar(self):
         if not self.service:
@@ -160,7 +175,40 @@ class GoogleCalendarService:
         except Exception:
             return None
 
-    def create_event(self, todo, reminders=None):
+    def _format_event_description(self, todo) -> str:
+        base_description = (todo.description or '').strip()
+        description = base_description
+
+        role = getattr(self.user, 'role', None)
+
+        match role:
+            case 'dean':
+                assignee = getattr(todo, 'assignee', None)
+                if assignee:
+                    full_name = (assignee.get_full_name() or '').strip()
+                    if not full_name:
+                        full_name = (getattr(assignee, 'username', '') or getattr(assignee, 'email', '') or '').strip()
+                    if full_name:
+                        assignee_line = f'Назначен: {full_name}'
+                        description = f'{base_description}\n\n{assignee_line}' if base_description else assignee_line
+                        return description
+                none_line = 'Назначен: отсутствует'
+                description = f'{base_description}\n\n{none_line}' if base_description else none_line
+                return description
+
+            case _:
+                creator_role = getattr(todo.creator, 'role', None)
+                if creator_role != 'teacher':
+                    full_name = (todo.creator.get_full_name() or '').strip()
+                    if not full_name:
+                        full_name = (getattr(todo.creator, 'username', '') or
+                                     getattr(todo.creator, 'email', '') or '').strip()
+                    if full_name:
+                        author_line = f'Автор: {full_name}'
+                        description = f'{base_description}\n\n{author_line}' if base_description else author_line
+                return description
+
+    def create_event(self, todo: ToDo, reminders: Optional[List[Dict[str, Any]]] = None):
         if not self.service or not todo.deadline:
             return None
 
@@ -170,17 +218,7 @@ class GoogleCalendarService:
         if not self.calendar_id:
             return None
 
-        base_description = (todo.description or '').strip()
-        description = base_description
-
-        creator_role = getattr(todo.creator, 'role', None)
-        if creator_role != 'teacher':
-            full_name = (todo.creator.get_full_name() or '').strip()
-            if not full_name:
-                full_name = (getattr(todo.creator, 'username', '') or getattr(todo.creator, 'email', '') or '').strip()
-            if full_name:
-                author_line = f'Автор: {full_name}'
-                description = f'{base_description}\n\n{author_line}' if base_description else author_line
+        description = self._format_event_description(todo)
 
         event = {
             'summary': f'[{todo.get_status_display()}] {todo.title} — To Do',
@@ -192,41 +230,12 @@ class GoogleCalendarService:
             'end': {
                 'dateTime': todo.deadline.isoformat(),
                 'timeZone': 'Asia/Tomsk',
+            },
+            'reminders': {
+                'useDefault': False,
+                'overrides': reminders if reminders is not None else [],
             }
         }
-
-        if reminders is None:
-            event['reminders'] = {
-                'useDefault': False,
-                'overrides': [{'method': 'popup', 'minutes': 15}],
-            }
-        elif isinstance(reminders, list):
-            if not reminders:
-                event['reminders'] = {'useDefault': False, 'overrides': []}
-            else:
-                filtered_overrides = []
-                seen_pairs = set()
-                for r in reminders:
-                    method = r.get('method')
-                    minutes = r.get('minutes')
-                    if method in ('popup', 'email'):
-                        try:
-                            minutes_int = int(minutes)
-                        except (TypeError, ValueError):
-                            continue
-                        if minutes_int > 0:
-                            pair = (method, minutes_int)
-                            if pair in seen_pairs:
-                                continue
-                            seen_pairs.add(pair)
-                            filtered_overrides.append({'method': method, 'minutes': minutes_int})
-                if filtered_overrides:
-                    event['reminders'] = {
-                        'useDefault': False,
-                        'overrides': filtered_overrides[:5]
-                    }
-                else:
-                    event['reminders'] = {'useDefault': False, 'overrides': []}
 
         try:
             created_event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()

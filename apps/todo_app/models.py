@@ -29,6 +29,10 @@ class ToDo(models.Model):
     )
 
     calendar_event_id = models.CharField(max_length=255, null=True, blank=True)
+    creator_calendar_event_id = models.CharField(max_length=255, null=True, blank=True)
+    last_sync_error = models.TextField(null=True, blank=True)
+    reminders = models.JSONField(null=True, blank=True)
+    creator_reminders = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -59,7 +63,7 @@ class ToDo(models.Model):
         return bool(user and user.is_authenticated and
                     (self.creator_id == user.id or getattr(user, 'role', None) == 'admin'))
 
-    def sync_calendar_event(self, calendar_service, reminders=None):
+    def sync_calendar_event(self, calendar_service, reminders=None, for_creator=False):
         if not self.deadline:
             return None
         try:
@@ -67,9 +71,11 @@ class ToDo(models.Model):
                 event_id = calendar_service.create_event(self)
             else:
                 event_id = calendar_service.create_event(self, reminders=reminders)
+
             if event_id:
-                self.calendar_event_id = event_id
-                self.save(update_fields=["calendar_event_id"])
+                field = "creator_calendar_event_id" if for_creator else "calendar_event_id"
+                setattr(self, field, event_id)
+                self.save(update_fields=[field])
                 return event_id
         except Exception:
             return None
