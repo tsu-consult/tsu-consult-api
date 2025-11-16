@@ -8,6 +8,8 @@ from django.utils import timezone
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from celery.exceptions import CeleryError
 
 from apps.notification_app.models import Notification
 from apps.profile_app.models import GoogleToken
@@ -111,7 +113,7 @@ def schedule_fallback_reminders(todo, reminders, target_user=None):
             try:
                 send_notification_task.delay(n.id)
                 logger.info("Scheduled immediate notification %s for todo %s", n.id, todo.id)
-            except Exception as e:
+            except (CeleryError, RuntimeError) as e:
                 logger.exception("Failed scheduling immediate notification %s for todo %s: %s", n.id, todo.id, e)
             continue
 
@@ -127,7 +129,7 @@ def schedule_fallback_reminders(todo, reminders, target_user=None):
         try:
             send_notification_task.apply_async(args=[n.id], eta=notify_at)
             logger.info("Scheduled deferred notification %s for todo %s at %s", n.id, todo.id, notify_at)
-        except Exception as e:
+        except (CeleryError, RuntimeError) as e:
             logger.exception("Failed scheduling deferred notification %s for todo %s: %s", n.id, todo.id, e)
 
 
@@ -140,8 +142,13 @@ class GoogleCalendarService:
         if user and user.is_authenticated:
             try:
                 google_token = GoogleToken.objects.get(user=self.user)
-                creds = Credentials.from_authorized_user_info(json.loads(google_token.credentials))
-                self.service = build('calendar', 'v3', credentials=creds)
+                try:
+                    creds = Credentials.from_authorized_user_info(json.loads(google_token.credentials))
+                    self.service = build('calendar', 'v3', credentials=creds)
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                    logger.exception("Invalid GoogleToken.credentials for user id=%s: %s",
+                                     getattr(self.user, 'id', None), exc)
+                    self.service = None
             except GoogleToken.DoesNotExist:
                 self.service = None
 
@@ -172,7 +179,13 @@ class GoogleCalendarService:
         except RefreshError:
             self._handle_refresh_error()
             return None
-        except Exception:
+        except HttpError as exc:
+            logger.exception("Google API HttpError while getting/creating calendar for user id=%s: %s",
+                             getattr(self.user, 'id', None), exc)
+            return None
+        except (ValueError, TypeError) as exc:
+            logger.exception("Unexpected data error while getting/creating calendar for user id=%s: %s",
+                             getattr(self.user, 'id', None), exc)
             return None
 
     def _format_event_description(self, todo) -> str:
@@ -243,7 +256,13 @@ class GoogleCalendarService:
         except RefreshError:
             self._handle_refresh_error()
             return None
-        except Exception:
+        except HttpError as exc:
+            logger.exception("Google API HttpError while creating event for user id=%s, todo id=%s: %s",
+                             getattr(self.user, 'id', None), getattr(todo, 'id', None), exc)
+            return None
+        except (ValueError, TypeError) as exc:
+            logger.exception("Invalid data while creating event for user id=%s, todo id=%s: %s",
+                             getattr(self.user, 'id', None), getattr(todo, 'id', None), exc)
             return None
 
     def delete_event(self):
