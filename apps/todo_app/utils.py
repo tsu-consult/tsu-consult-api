@@ -1,4 +1,7 @@
 ﻿from typing import Any, Dict, List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 TEACHER_DEFAULT_REMINDERS = [
     {"method": "popup", "minutes": 15},
@@ -24,25 +27,31 @@ def _normalize_and_sort_reminders(reminders: Optional[List[Dict[str, Any]]]) -> 
         return []
     normalized: List[Dict[str, Any]] = []
     seen = set()
-    for r in reminders:
+    for idx, r in enumerate(reminders):
         if not isinstance(r, dict):
+            logger.debug("Skipping reminder at index %s: not a dict (%r)", idx, r)
             continue
         method = r.get('method')
         minutes = r.get('minutes')
         if not isinstance(method, str) or method not in ('popup', 'email'):
+            logger.debug("Skipping reminder at index %s: invalid method (%r)", idx, method)
             continue
         try:
             minutes_int = int(minutes)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Skipping reminder at index %s: cannot convert minutes (%r): %s", idx, minutes, exc)
             continue
         if minutes_int <= 0:
+            logger.debug("Skipping reminder at index %s: non-positive minutes (%d)", idx, minutes_int)
             continue
         pair = (method, minutes_int)
         if pair in seen:
+            logger.debug("Skipping duplicate reminder at index %s: %s", idx, pair)
             continue
         seen.add(pair)
         normalized.append({'method': method, 'minutes': minutes_int})
         if len(normalized) >= MAX_REMINDERS * 2:
+            logger.debug("Reached buffer limit while normalizing reminders")
             break
     normalized.sort(key=lambda x: x['minutes'])
     return normalized[:MAX_REMINDERS]
@@ -157,11 +166,17 @@ def sync_and_handle_event(todo: Any,
     if getattr(calendar_svc, 'service', None):
         try:
             event_id = todo.sync_calendar_event(calendar_svc, reminders=reminders, for_creator=for_creator)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Calendar sync failed for todo id=%s: %s", getattr(todo, 'id', '<unknown>'), exc)
             event_id = None
 
     if ((not getattr(calendar_svc, 'service', None) or event_id is None) and getattr(todo, 'deadline', None)
             and reminders):
-        schedule_fallback_reminders(todo, reminders, target_user=target_user)
+        try:
+            schedule_fallback_reminders(todo, reminders, target_user=target_user)
+        except Exception as exc:
+            logger.exception("Failed to schedule fallback reminders for todo id=%s: %s",
+                             getattr(todo, 'id', '<unknown>'), exc)
+            raise
 
     return event_id
