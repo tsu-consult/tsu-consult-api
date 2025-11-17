@@ -15,7 +15,6 @@ from celery.exceptions import CeleryError
 from apps.notification_app.models import Notification
 from apps.profile_app.models import GoogleToken
 from apps.todo_app.models import ToDo
-from apps.todo_app.utils import _normalize_and_sort_reminders
 from core.exceptions import GoogleCalendarAuthRequired
 
 logger = logging.getLogger(__name__)
@@ -282,23 +281,15 @@ class GoogleCalendarService:
 
         description = self._format_event_description(todo)
 
-        try:
-            normalized = _normalize_and_sort_reminders(reminders)
-        except (ValueError, TypeError) as exc:
-            logger.warning(
-                "Invalid reminders format for todo id=%s: %s", getattr(todo, "id", None), exc
-            )
-            normalized = []
-
         start = self._make_aware_datetime(todo.deadline)
-        end = start + timedelta(minutes=1)
+        end = start
 
         event_body = {
             "summary": f"[{todo.get_status_display()}] {todo.title} — To Do",
             "description": description,
             "start": {"dateTime": start.isoformat(), "timeZone": self.TIMEZONE},
             "end": {"dateTime": end.isoformat(), "timeZone": self.TIMEZONE},
-            "reminders": {"useDefault": False, "overrides": normalized},
+            "reminders": {"useDefault": False, "overrides": reminders},
         }
 
         try:

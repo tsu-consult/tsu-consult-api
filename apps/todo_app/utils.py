@@ -1,6 +1,8 @@
 ﻿from typing import Any, Dict, List, Optional
 import logging
 
+from apps.todo_app.services import schedule_fallback_reminders
+
 logger = logging.getLogger(__name__)
 
 TEACHER_DEFAULT_REMINDERS = [
@@ -57,83 +59,36 @@ def _normalize_and_sort_reminders(reminders: Optional[List[Dict[str, Any]]]) -> 
     return normalized[:MAX_REMINDERS]
 
 
-def merge_reminders(r1: Optional[List[Dict[str, Any]]],
-                    r2: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+def get_user_reminders(user: Any,
+                       initial: Optional[Dict[str, Any]],
+                       reminders: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     """
-    Merge two reminders lists removing duplicates by (method, minutes).
+    Return normalized reminders for a user, using role-based defaults if none are provided.
 
-    :param r1: First reminders list or ``None``.
-    :type r1: Optional[List[Dict[str, Any]]]
-    :param r2: Second reminders list or ``None``.
-    :type r2: Optional[List[Dict[str, Any]]]
-
-    :return: Merged list without duplicate (method, minutes) pairs, or ``None`` if both inputs are ``None``.
-    :rtype: Optional[List[Dict[str, Any]]]
+    :param user: User object with `role` attribute.
+    :param initial: Raw request data used to detect presence of the `reminders` field.
+    :type initial: Optional[Dict[str, Any]]
+    :param reminders: Optional list of reminders provided by the user.
+    :return: List of normalized reminders, limited to MAX_REMINDERS.
     """
-    if r1 is None and r2 is None:
-        return None
 
-    combined = (r1 or []) + (r2 or [])
-    merged = _normalize_and_sort_reminders(combined)
-    return merged
+    if 'reminders' in (initial or {}):
+        try:
+            return _normalize_and_sort_reminders(reminders)
+        except (ValueError, TypeError) as exc:
+            logger.warning("Invalid reminders provided by user id=%s: %s", getattr(user, 'id', None), exc)
 
-
-def resolve_assignee_reminders(initial_data: Optional[Dict[str, Any]],
-                               provided_reminders: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """
-    Return reminders for assignee.
-
-    If the request payload contains the `reminders` field, its value is used (``None`` means an explicit
-    empty list). Otherwise, the default teacher reminders are returned.
-
-    :param initial_data: Raw request data used to detect presence of the `reminders` field.
-    :type initial_data: Optional[Dict[str, Any]]
-    :param provided_reminders: Parsed reminders from the serializer or ``None``.
-    :type provided_reminders: Optional[List[Dict[str, Any]]]
-
-    :return: Reminders list for the assignee (maybe empty).
-    :rtype: List[Dict[str, Any]]
-    """
-    if 'reminders' in (initial_data or {}):
-        base = provided_reminders if provided_reminders is not None else []
-        return _normalize_and_sort_reminders(base)
-    return _normalize_and_sort_reminders(TEACHER_DEFAULT_REMINDERS)
-
-
-def resolve_creator_reminders(initial_data: Optional[Dict[str, Any]],
-                              creator_provided_reminders: Optional[List[Dict[str, Any]]],
-                              request_user) -> Optional[List[Dict[str, Any]]]:
-    """
-    Determine reminders for the creator.
-
-    If the request payload contains the `creator_reminders` field, its value is returned (``None`` means an
-    explicit empty list). Otherwise, role-based defaults are returned: dean -> ``DEAN_DEFAULT_REMINDERS``,
-    teacher -> ``TEACHER_DEFAULT_REMINDERS``. For other roles ``None`` is returned (no reminders).
-
-    :param initial_data: Raw request data used to detect presence of the `creator_reminders` field.
-    :type initial_data: Optional[Dict[str, Any]]
-    :param creator_provided_reminders: Parsed creator_reminders from the serializer or ``None``.
-    :type creator_provided_reminders: Optional[List[Dict[str, Any]]]
-    :param request_user: Request user object (used to inspect the role attribute).
-    :type request_user: Any
-
-    :return: Reminders for the creator, or ``None`` if no reminders should be created.
-    :rtype: Optional[List[Dict[str, Any]]]
-    """
-    if 'creator_reminders' in (initial_data or {}):
-        return _normalize_and_sort_reminders(creator_provided_reminders
-                                             if creator_provided_reminders is not None else [])
-
-    role = getattr(request_user, 'role', None)
-    if role == 'dean':
-        return _normalize_and_sort_reminders(DEAN_DEFAULT_REMINDERS)
+    role = getattr(user, 'role', None) if user else None
     if role == 'teacher':
         return _normalize_and_sort_reminders(TEACHER_DEFAULT_REMINDERS)
-    return None
+    if role == 'dean':
+        return _normalize_and_sort_reminders(DEAN_DEFAULT_REMINDERS)
+
+    return []
 
 
 def sync_and_handle_event(todo: Any,
-                          calendar_svc: Any,
+                          calendar_service: Any,
                           reminders: Optional[List[Dict[str, Any]]],
                           target_user: Any,
                           for_creator: bool = False) -> Optional[str]:
@@ -142,8 +97,8 @@ def sync_and_handle_event(todo: Any,
 
     :param todo: ToDo instance to sync. Must have a ``deadline`` attribute.
     :type todo: apps.todo_app.models.ToDo
-    :param calendar_svc: Calendar service instance (e.g. ``GoogleCalendarService``) which exposes ``.service``.
-    :type calendar_svc: Any
+    :param calendar_service: Calendar service instance (e.g. ``GoogleCalendarService``) which exposes ``.service``.
+    :type calendar_service: Any
     :param reminders: Reminders to apply for the calendar event. If ``None``, defaults are used by the service.
     :type reminders: Optional[List[Dict[str, Any]]]
     :param target_user: User who should receive fallback (Telegram) notifications if calendar sync fails.
@@ -161,16 +116,15 @@ def sync_and_handle_event(todo: Any,
         return None
 
     event_id = None
-    from apps.todo_app.services import schedule_fallback_reminders
 
-    if getattr(calendar_svc, 'service', None):
+    if getattr(calendar_service, 'service', None):
         try:
-            event_id = todo.sync_calendar_event(calendar_svc, reminders=reminders, for_creator=for_creator)
+            event_id = todo.create_calendar_event(calendar_service, reminders=reminders, for_creator=for_creator)
         except Exception as exc:
             logger.exception("Calendar sync failed for todo id=%s: %s", getattr(todo, 'id', '<unknown>'), exc)
             event_id = None
 
-    if ((not getattr(calendar_svc, 'service', None) or event_id is None) and getattr(todo, 'deadline', None)
+    if ((not getattr(calendar_service, 'service', None) or event_id is None) and getattr(todo, 'deadline', None)
             and reminders):
         try:
             schedule_fallback_reminders(todo, reminders, target_user=target_user)

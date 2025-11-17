@@ -12,8 +12,7 @@ from apps.todo_app.serializers import ToDoRequestSerializer, ToDoResponseSeriali
 from apps.todo_app.services import (
     GoogleCalendarService
 )
-from apps.todo_app.utils import (merge_reminders, resolve_assignee_reminders,
-                                 resolve_creator_reminders, sync_and_handle_event)
+from apps.todo_app.utils import (sync_and_handle_event, get_user_reminders)
 from core.mixins import ErrorResponseMixin
 from core.serializers import ErrorResponseSerializer
 
@@ -26,6 +25,9 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
     @swagger_auto_schema(
         tags=["To Do"],
         operation_summary="Создание новой задачи",
+        operation_description="Поле `reminders` используется для указания напоминаний создателя задачи и является "
+                              "необязательным.\n\nЕсли не указано, будут использованы значения "
+                              "по умолчанию в зависимости от роли пользователя.",
         request_body=ToDoRequestSerializer,
         responses={
             201: openapi.Response(description="Задача создана", schema=ToDoResponseSerializer),
@@ -39,26 +41,25 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
         serializer = ToDoRequestSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
 
-        provided_reminders = serializer.validated_data.get('reminders', None)
-        creator_provided_reminders = serializer.validated_data.get('creator_reminders', None)
+        reminders = serializer.validated_data.get('reminders', None)
         initial = serializer.initial_data or {}
+
         todo = serializer.save()
 
-        assignee_reminders = resolve_assignee_reminders(initial, provided_reminders)
-        creator_reminders = resolve_creator_reminders(initial, creator_provided_reminders, request.user)
+        reminders = get_user_reminders(request.user, initial, reminders)
+        assignee_reminders = get_user_reminders(todo.assignee, initial)
 
-        calendar_service = GoogleCalendarService(user=todo.assignee)
+        todo.reminders = reminders
+        todo.save(update_fields=["reminders"])
 
-        if todo.assignee and todo.assignee.id == request.user.id:
-            merged = merge_reminders(assignee_reminders, creator_reminders)
-            sync_and_handle_event(todo, calendar_service, merged, target_user=request.user, for_creator=False)
-        else:
-            sync_and_handle_event(todo, calendar_service, assignee_reminders,
-                                  target_user=todo.assignee, for_creator=False)
+        calendar_service = GoogleCalendarService(user=request.user)
 
-            creator_calendar_service = GoogleCalendarService(user=request.user)
-            sync_and_handle_event(todo, creator_calendar_service, creator_reminders,
-                                  target_user=request.user, for_creator=True)
+        sync_and_handle_event(todo, calendar_service, reminders, target_user=request.user, for_creator=True)
+
+        if todo.assignee and todo.assignee != request.user:
+            assignee_calendar_service = GoogleCalendarService(user=todo.assignee)
+            sync_and_handle_event(todo, assignee_calendar_service, assignee_reminders,
+                                  target_user=todo.assignee)
 
             Notification.objects.create(
                 user=todo.assignee,
