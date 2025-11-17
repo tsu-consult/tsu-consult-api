@@ -5,15 +5,17 @@ from datetime import timedelta
 from typing import Optional, List, Dict, Any
 
 from django.utils import timezone
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import RefreshError, GoogleAuthError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from google.auth.transport.requests import Request as GoogleRequest
 from celery.exceptions import CeleryError
 
 from apps.notification_app.models import Notification
 from apps.profile_app.models import GoogleToken
 from apps.todo_app.models import ToDo
+from apps.todo_app.utils import _normalize_and_sort_reminders
 from core.exceptions import GoogleCalendarAuthRequired
 
 logger = logging.getLogger(__name__)
@@ -130,23 +132,34 @@ def schedule_fallback_reminders(todo, reminders, target_user=None):
 
 
 class GoogleCalendarService:
+    CALENDAR_NAME = "TSU Consult"
+    TIMEZONE = "Asia/Tomsk"
+
     def __init__(self, user=None):
         self.user = user
         self.service = None
         self.calendar_id = None
+        self.creds: Optional[Credentials] = None
 
-        if user and user.is_authenticated:
-            try:
-                google_token = GoogleToken.objects.get(user=self.user)
-                try:
-                    creds = Credentials.from_authorized_user_info(json.loads(google_token.credentials))
-                    self.service = build('calendar', 'v3', credentials=creds)
-                except (json.JSONDecodeError, ValueError, TypeError) as exc:
-                    logger.exception("Invalid GoogleToken.credentials for user id=%s: %s",
-                                     getattr(self.user, 'id', None), exc)
-                    self.service = None
-            except GoogleToken.DoesNotExist:
-                self.service = None
+        if not user or not getattr(user, "is_authenticated", False):
+            return
+
+        try:
+            google_token = GoogleToken.objects.get(user=user)
+        except GoogleToken.DoesNotExist:
+            return
+
+        try:
+            creds = Credentials.from_authorized_user_info(json.loads(google_token.credentials))
+            self.creds = creds
+            self._ensure_credentials_valid()
+            if self.creds and getattr(self.creds, "valid", False):
+                self.service = build("calendar", "v3", credentials=self.creds)
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.exception(
+                "Invalid GoogleToken.credentials for user id=%s: %s", getattr(user, "id", None), exc
+            )
+            self.service = None
 
     def _handle_refresh_error(self):
         if self.user:
@@ -155,111 +168,159 @@ class GoogleCalendarService:
         self.calendar_id = None
         raise GoogleCalendarAuthRequired()
 
-    def _get_or_create_calendar(self):
+    def _ensure_credentials_valid(self):
+        if not self.creds:
+            return
+
+        try:
+            if getattr(self.creds, "valid", False):
+                return
+
+            if getattr(self.creds, "expired", False) and getattr(self.creds, "refresh_token", None):
+                try:
+                    self.creds.refresh(GoogleRequest())
+                    if self.user:
+                        GoogleToken.objects.filter(user=self.user).update(credentials=self.creds.to_json())
+                    self.service = build("calendar", "v3", credentials=self.creds)
+                except RefreshError:
+                    logger.warning(
+                        "RefreshError while refreshing credentials for user id=%s", getattr(self.user, "id", None)
+                    )
+                    self._handle_refresh_error()
+            else:
+                logger.warning(
+                    "Credentials invalid and no refresh_token for user id=%s", getattr(self.user, "id", None)
+                )
+                self._handle_refresh_error()
+        except (RefreshError, GoogleAuthError, HttpError) as exc:
+            logger.exception("Error ensuring credentials for user id=%s: %s", getattr(self.user, "id", None), exc)
+            self.service = None
+
+    def _get_or_create_calendar(self) -> Optional[str]:
         if not self.service:
             return None
         try:
-            calendar_list = self.service.calendarList().list().execute()
-            for calendar_list_entry in calendar_list.get('items', []):
-                if calendar_list_entry['summary'] == 'TSU Consult':
-                    self.calendar_id = calendar_list_entry['id']
-                    return self.calendar_id
+            page_token = None
+            while True:
+                resp = self.service.calendarList().list(pageToken=page_token).execute()
+                for calendar_entry in resp.get("items", []):
+                    if calendar_entry.get("summary") == self.CALENDAR_NAME:
+                        self.calendar_id = calendar_entry.get("id")
+                        return self.calendar_id
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
 
-            calendar = {
-                'summary': 'TSU Consult',
-                'timeZone': 'Asia/Tomsk',
-            }
-            created_calendar = self.service.calendars().insert(body=calendar).execute()
-            self.calendar_id = created_calendar['id']
+            created_calendar = self.service.calendars().insert(
+                body={"summary": self.CALENDAR_NAME, "timeZone": self.TIMEZONE}
+            ).execute()
+            self.calendar_id = created_calendar.get("id")
             return self.calendar_id
         except RefreshError:
             self._handle_refresh_error()
-            return None
         except HttpError as exc:
-            logger.exception("Google API HttpError while getting/creating calendar for user id=%s: %s",
-                             getattr(self.user, 'id', None), exc)
-            return None
+            logger.exception(
+                "Google API HttpError while getting/creating calendar for user id=%s: %s",
+                getattr(self.user, "id", None),
+                exc,
+            )
         except (ValueError, TypeError) as exc:
-            logger.exception("Unexpected data error while getting/creating calendar for user id=%s: %s",
-                             getattr(self.user, 'id', None), exc)
+            logger.exception(
+                "Invalid data while getting/creating calendar for user id=%s: %s",
+                getattr(self.user, "id", None),
+                exc,
+            )
+        return None
+
+    def _format_event_description(self, todo: ToDo) -> str:
+        base_description = (todo.description or "").strip()
+
+        role = getattr(self.user, "role", None)
+
+        if role == "dean":
+            assignee = getattr(todo, "assignee", None)
+            if assignee:
+                full_name = (assignee.get_full_name() or "").strip()
+                if not full_name:
+                    full_name = (getattr(assignee, "username", "") or getattr(assignee, "email", "")).strip()
+                assignee_line = f"Назначен: {full_name}" if full_name else "Назначен: отсутствует"
+            else:
+                assignee_line = "Назначен: отсутствует"
+            return f"{base_description}\n\n{assignee_line}" if base_description else assignee_line
+
+        creator_role = getattr(todo.creator, "role", None)
+        if creator_role != "teacher":
+            full_name = (todo.creator.get_full_name() or "").strip()
+            if not full_name:
+                full_name = (getattr(todo.creator, "username", "") or getattr(todo.creator, "email", "")).strip()
+            if full_name:
+                author_line = f"Автор: {full_name}"
+                return f"{base_description}\n\n{author_line}" if base_description else author_line
+
+        return base_description
+
+    @staticmethod
+    def _make_aware_datetime(dt):
+        if timezone.is_naive(dt):
+            try:
+                return timezone.make_aware(dt, timezone.get_current_timezone())
+            except (ValueError, TypeError):
+                return timezone.localtime(dt)
+        return dt
+
+    def create_event(self, todo: ToDo, reminders: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
+        if not getattr(todo, "deadline", None):
             return None
 
-    def _format_event_description(self, todo) -> str:
-        base_description = (todo.description or '').strip()
-        description = base_description
-
-        role = getattr(self.user, 'role', None)
-
-        match role:
-            case 'dean':
-                assignee = getattr(todo, 'assignee', None)
-                if assignee:
-                    full_name = (assignee.get_full_name() or '').strip()
-                    if not full_name:
-                        full_name = (getattr(assignee, 'username', '') or getattr(assignee, 'email', '') or '').strip()
-                    if full_name:
-                        assignee_line = f'Назначен: {full_name}'
-                        description = f'{base_description}\n\n{assignee_line}' if base_description else assignee_line
-                        return description
-                none_line = 'Назначен: отсутствует'
-                description = f'{base_description}\n\n{none_line}' if base_description else none_line
-                return description
-
-            case _:
-                creator_role = getattr(todo.creator, 'role', None)
-                if creator_role != 'teacher':
-                    full_name = (todo.creator.get_full_name() or '').strip()
-                    if not full_name:
-                        full_name = (getattr(todo.creator, 'username', '') or
-                                     getattr(todo.creator, 'email', '') or '').strip()
-                    if full_name:
-                        author_line = f'Автор: {full_name}'
-                        description = f'{base_description}\n\n{author_line}' if base_description else author_line
-                return description
-
-    def create_event(self, todo: ToDo, reminders: Optional[List[Dict[str, Any]]] = None):
-        if not self.service or not todo.deadline:
+        self._ensure_credentials_valid()
+        if not self.service:
             return None
-
         if not self.calendar_id:
             self._get_or_create_calendar()
-
         if not self.calendar_id:
             return None
 
         description = self._format_event_description(todo)
 
-        event = {
-            'summary': f'[{todo.get_status_display()}] {todo.title} — To Do',
-            'description': description,
-            'start': {
-                'dateTime': todo.deadline.isoformat(),
-                'timeZone': 'Asia/Tomsk',
-            },
-            'end': {
-                'dateTime': todo.deadline.isoformat(),
-                'timeZone': 'Asia/Tomsk',
-            },
-            'reminders': {
-                'useDefault': False,
-                'overrides': reminders if reminders is not None else [],
-            }
+        try:
+            normalized = _normalize_and_sort_reminders(reminders)
+        except (ValueError, TypeError) as exc:
+            logger.warning(
+                "Invalid reminders format for todo id=%s: %s", getattr(todo, "id", None), exc
+            )
+            normalized = []
+
+        start = self._make_aware_datetime(todo.deadline)
+        end = start + timedelta(minutes=1)
+
+        event_body = {
+            "summary": f"[{todo.get_status_display()}] {todo.title} — To Do",
+            "description": description,
+            "start": {"dateTime": start.isoformat(), "timeZone": self.TIMEZONE},
+            "end": {"dateTime": end.isoformat(), "timeZone": self.TIMEZONE},
+            "reminders": {"useDefault": False, "overrides": normalized},
         }
 
         try:
-            created_event = self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
-            return created_event.get('id')
+            created_event = self.service.events().insert(calendarId=self.calendar_id, body=event_body).execute()
+            return created_event.get("id")
         except RefreshError:
             self._handle_refresh_error()
-            return None
         except HttpError as exc:
-            logger.exception("Google API HttpError while creating event for user id=%s, todo id=%s: %s",
-                             getattr(self.user, 'id', None), getattr(todo, 'id', None), exc)
-            return None
+            logger.exception(
+                "Google API HttpError while creating event for user id=%s, todo id=%s: %s",
+                getattr(self.user, "id", None),
+                getattr(todo, "id", None),
+                exc,
+            )
         except (ValueError, TypeError) as exc:
-            logger.exception("Invalid data while creating event for user id=%s, todo id=%s: %s",
-                             getattr(self.user, 'id', None), getattr(todo, 'id', None), exc)
-            return None
+            logger.exception(
+                "Invalid data while creating event for user id=%s, todo id=%s: %s",
+                getattr(self.user, "id", None),
+                getattr(todo, "id", None),
+                exc,
+            )
+        return None
 
     def delete_event(self):
         return True
