@@ -14,15 +14,11 @@ from celery.exceptions import CeleryError
 from apps.notification_app.models import Notification
 from apps.profile_app.models import GoogleToken
 from apps.todo_app.models import ToDo
+from core.exceptions import GoogleCalendarAuthRequired
 
 logger = logging.getLogger(__name__)
 
-
 FALLBACK_ALLOWED_MINUTES = {15, 30, 60, 1440}
-
-
-class GoogleCalendarAuthRequired(Exception):
-    pass
 
 
 def _russian_plural(n: int, forms: tuple[str, str, str]) -> str:

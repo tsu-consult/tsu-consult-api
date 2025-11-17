@@ -38,6 +38,7 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
     def post(self, request):
         serializer = ToDoRequestSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+
         provided_reminders = serializer.validated_data.get('reminders', None)
         creator_provided_reminders = serializer.validated_data.get('creator_reminders', None)
         initial = serializer.initial_data or {}
