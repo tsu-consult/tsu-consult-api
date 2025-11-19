@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 import json
 import requests
+import logging
 
 from config import settings
 from core.mixins import ErrorResponseMixin
@@ -150,7 +151,11 @@ class GoogleCalendarDisconnectView(ErrorResponseMixin, APIView):
                 }, timeout=5)
                 if resp.status_code == 200:
                     revoked_success = True
-        except Exception:
+        except (json.JSONDecodeError, TypeError) as e:
+            logging.exception("Failed to parse GoogleToken.credentials for user %s", getattr(request.user, 'id', None))
+            revoked_success = False
+        except requests.RequestException as e:
+            logging.exception("Failed to revoke Google token for user %s: %s", getattr(request.user, 'id', None), str(e))
             revoked_success = False
 
         token_obj.delete()
