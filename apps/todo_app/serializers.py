@@ -91,7 +91,7 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
             try:
                 normalized = normalize_validated_reminders(raw_reminders)
             except ValidationError as exc:
-                raise ValidationError({"reminders": exc.detail})
+                raise ValidationError(exc.detail)
         else:
             normalized = None
 

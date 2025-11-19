@@ -11,7 +11,7 @@ from apps.todo_app.config import MAX_REMINDERS, TEACHER_DEFAULT_REMINDERS, DEAN_
 logger = logging.getLogger(__name__)
 
 
-def _normalize_and_sort_reminders(reminders: Optional[List[Dict[str, any]]]) -> List[Dict[str, int]]:
+def normalize_and_sort_reminders(reminders: Optional[List[Dict[str, any]]]) -> List[Dict[str, int]]:
     """
     Convert reminders to uniform dicts with int minutes, filter invalid and sort by minutes ascending.
 
