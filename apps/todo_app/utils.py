@@ -173,7 +173,6 @@ def sync_and_handle_event(todo: Any,
 
     :raises Exception: If scheduling fallback reminders or other unexpected errors occur (may be propagated).
     """
-    from apps.todo_app.services import schedule_fallback_reminders
 
     if not getattr(todo, 'deadline', None):
         return None
@@ -188,7 +187,8 @@ def sync_and_handle_event(todo: Any,
                              getattr(todo, 'id', '<unknown>'), exc)
             if getattr(todo, 'deadline', None) and reminders:
                 try:
-                    schedule_fallback_reminders(todo, reminders, target_user=target_user)
+                    from apps.todo_app.services import FallbackReminderService
+                    FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=target_user)
                 except Exception as exc2:
                     logger.exception("Failed to schedule fallback reminders after Google API error for todo id=%s: %s",
                                      getattr(todo, 'id', '<unknown>'), exc2)
@@ -200,7 +200,8 @@ def sync_and_handle_event(todo: Any,
     if ((not getattr(calendar_service, 'service', None) or event_id is None) and getattr(todo, 'deadline', None)
             and reminders):
         try:
-            schedule_fallback_reminders(todo, reminders, target_user=target_user)
+            from apps.todo_app.services import FallbackReminderService
+            FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=target_user)
         except Exception as exc:
             logger.exception("Failed to schedule fallback reminders for todo id=%s: %s",
                              getattr(todo, 'id', '<unknown>'), exc)

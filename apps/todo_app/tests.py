@@ -11,8 +11,10 @@ from rest_framework.test import APIClient
 from apps.auth_app.models import User
 from apps.notification_app.models import Notification
 from apps.todo_app.models import ToDo
-from apps.todo_app.services import schedule_fallback_reminders
+from apps.todo_app.services import FallbackReminderService
 from apps.todo_app.utils import normalize_reminders_for_fallback
+from apps.todo_app.config import MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH
+from celery.exceptions import CeleryError
 
 
 class BaseTest(TestCase):
@@ -38,13 +40,17 @@ class BaseTest(TestCase):
         self.mock_utils_logger_exc = self.utils_logger_exc_patcher.start()
         self.addCleanup(self.utils_logger_exc_patcher.stop)
         self.mock_utils_logger_exc.return_value = None
+        self.services_logger_exc_patcher = patch('apps.todo_app.services.logger.exception')
+        self.mock_services_logger_exc = self.services_logger_exc_patcher.start()
+        self.addCleanup(self.services_logger_exc_patcher.stop)
+        self.mock_services_logger_exc.return_value = None
 
     @contextmanager
     def patched_calendar_and_fallback(self, mock_service=None):
         if mock_service is None:
             mock_service = Mock()
         with patch('apps.todo_app.views.GoogleCalendarService', return_value=mock_service), \
-                patch('apps.todo_app.services.schedule_fallback_reminders') as mock_fallback:
+                patch('apps.todo_app.services.FallbackReminderService.schedule_fallback_reminders') as mock_fallback:
             yield mock_service, mock_fallback
 
     def post_with_calendar_and_fallback(self, user, data, mock_service=None):
@@ -414,7 +420,7 @@ class ToDoRemindersTests(BaseTest):
         todo = ToDo.objects.create(title='FallbackRem', creator=self.teacher, assignee=self.teacher, deadline=future)
 
         reminders = [{'method': 'popup', 'minutes': 15}, {'method': 'popup', 'minutes': 60}]
-        schedule_fallback_reminders(todo, reminders, target_user=self.teacher)
+        FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=self.teacher)
 
         notifs = Notification.objects.filter(user=self.teacher, title__icontains='Напоминание о задаче')
         self.assertTrue(notifs.exists())
@@ -455,7 +461,7 @@ class ToDoNotificationTests(BaseTest):
 
         reminders = [{'method': 'popup', 'minutes': 15}]
 
-        schedule_fallback_reminders(todo, reminders, target_user=self.teacher)
+        FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=self.teacher)
 
         notif = Notification.objects.filter(user=self.teacher, title__icontains='Напоминание о задаче').first()
         self.assertIsNotNone(notif)
@@ -490,3 +496,76 @@ class ToDoNotificationTests(BaseTest):
         dean_notifs = Notification.objects.filter(user=self.dean, title__icontains='Напоминание о задаче',
                                                   message__icontains='Teacher Personal With Reminders')
         self.assertFalse(dean_notifs.exists())
+
+
+class ToDoValidationTests(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.teacher = User.objects.create_user(email='v@example.com', username='v', role='teacher')
+
+    def post_as(self, user, data):
+        self.client.force_authenticate(user=user)
+        return self.client.post('/todo/', data, format='json')
+
+    def test_title_is_required(self):
+        resp = self.post_as(self.teacher, {'description': 'No title'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('title', resp.data.get('message', {}))
+
+    def test_title_and_description_length_limits(self):
+        long_title = 'a' * (MAX_TITLE_LENGTH + 1)
+        long_desc = 'b' * (MAX_DESCRIPTION_LENGTH + 1)
+        resp = self.post_as(self.teacher, {'title': long_title})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('title', resp.data.get('message', {}))
+
+        resp2 = self.post_as(self.teacher, {'title': 'Ok', 'description': long_desc})
+        self.assertEqual(resp2.status_code, 400)
+        self.assertIn('description', resp2.data.get('message', {}))
+
+    def test_invalid_date_format_returns_error(self):
+        resp = self.post_as(self.teacher, {'title': 'Bad Date', 'deadline': 'not-a-date'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('deadline', str(resp.data))
+
+    def test_invalid_assignee_id_returns_error(self):
+        resp = self.post_as(self.teacher, {'title': 'Bad Assignee', 'assignee_id': 999999})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('User with id', str(resp.data))
+
+
+class ToDoErrorHandlingTests(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.teacher = User.objects.create_user(email='err_gc@example.com', username='err_gc', role='teacher')
+
+    def test_celery_failure_is_logged_and_does_not_raise(self):
+        future = timezone.now() + timedelta(hours=2)
+        todo = ToDo.objects.create(title='CeleryFail', creator=self.teacher, assignee=self.teacher, deadline=future)
+
+        reminders = [{'method': 'popup', 'minutes': 15}]
+
+        self.mock_task_delay.side_effect = CeleryError('delay boom')
+        self.mock_task_apply_async.side_effect = CeleryError('apply_async boom')
+
+        FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=self.teacher)
+
+        self.assertTrue(self.mock_services_logger_exc.called)
+
+    def test_google_api_http_error_handled_and_fallback_used(self):
+        future = timezone.now() + timedelta(hours=1)
+        data = {
+            'title': 'GC Error Handling Test',
+            'deadline': future.isoformat(),
+            'reminders': [{'method': 'popup', 'minutes': 15}],
+        }
+
+        def raise_http(*args, **kwargs):
+            raise HttpError(Mock(), b'error')
+
+        resp, svc, mock_fallback = self.post_todo_as(self.teacher, data, service=True,
+                                                     create_event_side_effect=raise_http)
+
+        self.assertIn(resp.status_code, (500, 201))
+        self.assertTrue(mock_fallback.called)
+
