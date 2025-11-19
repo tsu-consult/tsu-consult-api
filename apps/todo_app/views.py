@@ -12,7 +12,7 @@ from apps.todo_app.serializers import ToDoRequestSerializer, ToDoResponseSeriali
 from apps.todo_app.services import (
     GoogleCalendarService
 )
-from apps.todo_app.utils import (sync_and_handle_event, get_user_reminders)
+from apps.todo_app.utils import (sync_and_handle_event)
 from core.mixins import ErrorResponseMixin
 from core.serializers import ErrorResponseSerializer
 
@@ -40,26 +40,14 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
     def post(self, request):
         serializer = ToDoRequestSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-
-        reminders = serializer.validated_data.get('reminders', None)
-        initial = serializer.initial_data or {}
-
         todo = serializer.save()
 
-        reminders = get_user_reminders(request.user, initial, reminders)
-        assignee_reminders = get_user_reminders(todo.assignee, initial)
-
-        todo.reminders = reminders
-        todo.save(update_fields=["reminders"])
-
         calendar_service = GoogleCalendarService(user=request.user)
-
-        sync_and_handle_event(todo, calendar_service, reminders, target_user=request.user, for_creator=True)
+        sync_and_handle_event(todo, calendar_service, todo.reminders, target_user=request.user, for_creator=True)
 
         if todo.assignee and todo.assignee != request.user:
             assignee_calendar_service = GoogleCalendarService(user=todo.assignee)
-            sync_and_handle_event(todo, assignee_calendar_service, assignee_reminders,
-                                  target_user=todo.assignee)
+            sync_and_handle_event(todo, assignee_calendar_service, todo.assignee_reminders, todo.assignee)
 
             Notification.objects.create(
                 user=todo.assignee,

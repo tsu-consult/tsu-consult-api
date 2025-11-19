@@ -3,6 +3,7 @@ import logging
 import math
 from datetime import timedelta
 from typing import Optional, List, Dict, Any
+from apps.todo_app.utils import normalize_reminders_for_fallback
 
 from django.utils import timezone
 from google.auth.exceptions import RefreshError, GoogleAuthError
@@ -14,12 +15,11 @@ from celery.exceptions import CeleryError
 
 from apps.notification_app.models import Notification
 from apps.profile_app.models import GoogleToken
+from apps.todo_app.config import ALLOWED_MINUTES
 from apps.todo_app.models import ToDo
 from core.exceptions import GoogleCalendarAuthRequired
 
 logger = logging.getLogger(__name__)
-
-FALLBACK_ALLOWED_MINUTES = {15, 30, 60, 1440}
 
 
 def _russian_plural(n: int, forms: tuple[str, str, str]) -> str:
@@ -71,22 +71,7 @@ def schedule_fallback_reminders(todo, reminders, target_user=None):
     target_user = target_user or todo.assignee or todo.creator
     now = timezone.now()
 
-    seen_minutes = set()
-    unique_reminders = []
-    for r in reminders if isinstance(reminders, list) else []:
-        minutes = r.get('minutes')
-        try:
-            minutes_int = int(minutes)
-        except (TypeError, ValueError):
-            continue
-        if minutes_int <= 0 or minutes_int not in FALLBACK_ALLOWED_MINUTES:
-            continue
-        if minutes_int in seen_minutes:
-            continue
-        seen_minutes.add(minutes_int)
-        unique_reminders.append(minutes_int)
-        if len(unique_reminders) >= 5:
-            break
+    unique_reminders = normalize_reminders_for_fallback(reminders, ALLOWED_MINUTES, 5)
 
     for minutes_int in unique_reminders:
         notify_at = todo.deadline - timedelta(minutes=minutes_int)
@@ -167,33 +152,49 @@ class GoogleCalendarService:
         self.calendar_id = None
         raise GoogleCalendarAuthRequired()
 
-    def _ensure_credentials_valid(self):
+    def _refresh_credentials(self) -> bool:
+        if not self.creds:
+            return False
+
+        if getattr(self.creds, "valid", False):
+            return True
+
+        if getattr(self.creds, "expired", False) and getattr(self.creds, "refresh_token", None):
+            try:
+                self.creds.refresh(GoogleRequest())
+                if self.user:
+                    GoogleToken.objects.filter(user=self.user).update(credentials=self.creds.to_json())
+                self.service = build("calendar", "v3", credentials=self.creds)
+                return getattr(self.creds, "valid", False)
+            except RefreshError:
+                logger.warning(
+                    "RefreshError while refreshing credentials for user id=%s", getattr(self.user, "id", None)
+                )
+                self._handle_refresh_error()
+                return False
+
+        logger.warning(
+            "Credentials invalid and no refresh_token for user id=%s", getattr(self.user, "id", None)
+        )
+        self._handle_refresh_error()
+        return False
+
+    def _check_credentials(self):
         if not self.creds:
             return
 
         try:
-            if getattr(self.creds, "valid", False):
-                return
-
-            if getattr(self.creds, "expired", False) and getattr(self.creds, "refresh_token", None):
-                try:
-                    self.creds.refresh(GoogleRequest())
-                    if self.user:
-                        GoogleToken.objects.filter(user=self.user).update(credentials=self.creds.to_json())
-                    self.service = build("calendar", "v3", credentials=self.creds)
-                except RefreshError:
-                    logger.warning(
-                        "RefreshError while refreshing credentials for user id=%s", getattr(self.user, "id", None)
-                    )
-                    self._handle_refresh_error()
-            else:
-                logger.warning(
-                    "Credentials invalid and no refresh_token for user id=%s", getattr(self.user, "id", None)
-                )
-                self._handle_refresh_error()
-        except (RefreshError, GoogleAuthError, HttpError) as exc:
-            logger.exception("Error ensuring credentials for user id=%s: %s", getattr(self.user, "id", None), exc)
+            self._refresh_credentials()
+        except (RefreshError, GoogleAuthError) as exc:
+            logger.exception("Auth error ensuring credentials for user id=%s: %s", getattr(self.user, "id", None), exc)
             self.service = None
+        except HttpError as exc:
+            logger.exception("Google API HttpError while ensuring credentials for user id=%s: %s",
+                             getattr(self.user, "id", None), exc)
+            raise
+
+    def _ensure_credentials_valid(self):
+        return self._check_credentials()
 
     def _get_or_create_calendar(self) -> Optional[str]:
         if not self.service:
@@ -223,6 +224,7 @@ class GoogleCalendarService:
                 getattr(self.user, "id", None),
                 exc,
             )
+            raise
         except (ValueError, TypeError) as exc:
             logger.exception(
                 "Invalid data while getting/creating calendar for user id=%s: %s",
@@ -304,6 +306,7 @@ class GoogleCalendarService:
                 getattr(todo, "id", None),
                 exc,
             )
+            raise
         except (ValueError, TypeError) as exc:
             logger.exception(
                 "Invalid data while creating event for user id=%s, todo id=%s: %s",

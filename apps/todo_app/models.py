@@ -1,5 +1,8 @@
 from django.conf import settings
 from django.db import models
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ToDo(models.Model):
@@ -65,6 +68,11 @@ class ToDo(models.Model):
                 setattr(self, field, event_id)
                 self.save(update_fields=[field])
                 return event_id
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as exc:
+            logger.exception("Calendar sync failed for todo id=%s: %s", getattr(self, 'id', '<unknown>'), exc)
             return None
+        except Exception as exc:
+            logger.exception("Unexpected error while creating calendar event for todo id=%s: %s",
+                             getattr(self, 'id', '<unknown>'), exc)
+            raise
         return None
