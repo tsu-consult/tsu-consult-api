@@ -26,6 +26,7 @@ class Notification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     scheduled_for = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return f"Notification({self.user_id}, {self.type}, {self.status})"

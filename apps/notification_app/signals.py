@@ -5,7 +5,8 @@ from django.utils import timezone
 
 from apps.auth_app.models import TeacherApproval
 from apps.notification_app.models import Notification
-from apps.notification_app.tasks import send_notification_task
+from apps.notification_app.tasks import send_notification_task, sync_existing_todos
+from apps.profile_app.models import GoogleToken
 
 
 @receiver(post_save, sender=Notification)
@@ -40,3 +41,8 @@ def notify_teacher_on_approval_status(sender, instance: TeacherApproval, created
             message=message,
             status=Notification.Status.PENDING,
         )
+
+
+@receiver(post_save, sender=GoogleToken)
+def sync_after_integration(sender, instance, created, **kwargs):
+    sync_existing_todos.delay(instance.user.id)
