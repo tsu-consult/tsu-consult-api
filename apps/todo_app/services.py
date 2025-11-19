@@ -82,12 +82,16 @@ class FallbackReminderService:
             notify_at = todo.deadline - timedelta(minutes=minutes_int)
             if notify_at <= now:
                 remaining_seconds = (todo.deadline - now).total_seconds()
-                if remaining_seconds > 0:
-                    remaining_minutes = int(math.ceil(remaining_seconds / 60))
-                    interval_str = self.humanize_minutes(remaining_minutes)
-                    message = f'Через {interval_str} наступает дедлайн задачи "{todo.title}".'
-                else:
-                    message = f'Дедлайн задачи "{todo.title}" наступил.'
+                if remaining_seconds <= 0:
+                    logger.debug(
+                        "Skipping overdue reminder for todo %s: deadline passed (now=%s, deadline=%s)",
+                        getattr(todo, "id", None), now, getattr(todo, "deadline", None),
+                    )
+                    continue
+
+                remaining_minutes = int(math.ceil(remaining_seconds / 60))
+                interval_str = self.humanize_minutes(remaining_minutes)
+                message = f'Через {interval_str} наступает дедлайн задачи "{todo.title}".'
 
                 n = Notification.objects.create(
                     user=target_user,
