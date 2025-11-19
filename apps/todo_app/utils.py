@@ -11,7 +11,7 @@ from apps.todo_app.config import MAX_REMINDERS, TEACHER_DEFAULT_REMINDERS, DEAN_
 logger = logging.getLogger(__name__)
 
 
-def normalize_and_sort_reminders(reminders: Optional[List[Dict[str, any]]]) -> List[Dict[str, int]]:
+def normalize_and_sort_reminders(reminders: Optional[List[Dict[str, Any]]]) -> List[Dict[str, int]]:
     """
     Convert reminders to uniform dicts with int minutes, filter invalid and sort by minutes ascending.
 
@@ -73,6 +73,21 @@ def normalize_and_sort_reminders(reminders: Optional[List[Dict[str, any]]]) -> L
 
 
 def normalize_validated_reminders(reminders: Optional[List[Dict[str, any]]]) -> List[Dict[str, int]]:
+    """
+    Normalize and filter a list of reminders, assuming prior validation.
+
+    This function converts reminders to uniform dicts with integer 'minutes', filters out invalid or duplicate entries,
+    and sorts the result by ascending minutes. Unlike `normalize_and_sort_reminders`, this function silently skips
+    invalid entries (e.g., non-dict items, missing or non-integer 'minutes') and does not accumulate error details.
+    Use this function when reminders have already been validated or when you want to ignore invalid entries without
+    raising detailed errors.
+
+    :param reminders: Input reminders (may contain string minutes or invalid entries).
+    :type reminders: Optional[List[Dict[str, Any]]]
+    :return: Sorted and filtered reminders with integer minutes, limited to MAX_REMINDERS.
+    :rtype: List[Dict[str, int]]
+    :raises ValidationError: If no valid reminders remain after filtering.
+    """
     if not reminders:
         return []
 
@@ -194,9 +209,26 @@ def sync_and_handle_event(todo: Any,
     return event_id
 
 
-def normalize_reminders_for_fallback(reminders: Optional[List[Dict[str, any]]],
+def normalize_reminders_for_fallback(reminders: Optional[List[Dict[str, Any]]],
                                      allowed_minutes: Optional[List[int]] = None,
                                      limit: int = 5) -> List[int]:
+    """
+    Normalize and filter reminder dicts for fallback notification scheduling.
+
+    This function extracts the 'minutes' value from each reminder dict, ensures it is an integer,
+    filters out invalid or duplicate values, and only includes those minutes present in the allowed_minutes set.
+    The result is a list of unique, valid reminder times (in minutes), up to the specified limit.
+
+    :param reminders: List of reminder dicts, each expected to have a 'minutes' key.
+    :type reminders: Optional[List[Dict[str, Any]]]
+    :param allowed_minutes: List of allowed minute values. Only reminders with 'minutes' in this list are included.
+        If None, uses the default ALLOWED_MINUTES from config.
+    :type allowed_minutes: Optional[List[int]]
+    :param limit: Maximum number of reminders to return.
+    :type limit: int
+    :return: List of unique, valid reminder times (in minutes), filtered and limited.
+    :rtype: List[int]
+    """
     if not reminders:
         return []
 

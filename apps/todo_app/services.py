@@ -60,7 +60,7 @@ def humanize_minutes(m: int) -> str:
     return f"{m} {form}"
 
 
-def schedule_fallback_reminders(todo, reminders, target_user=None):
+def schedule_fallback_reminders(todo, reminders, target_user):
     if not reminders or not todo.deadline:
         return
 
@@ -68,7 +68,6 @@ def schedule_fallback_reminders(todo, reminders, target_user=None):
     logger.debug("schedule_fallback_reminders called for todo %s, target_user=%s",
                  getattr(todo, 'id', None), getattr(target_user, 'id', None) if target_user else None)
 
-    target_user = target_user or todo.assignee or todo.creator
     now = timezone.now()
 
     unique_reminders = normalize_reminders_for_fallback(reminders, ALLOWED_MINUTES, 5)
