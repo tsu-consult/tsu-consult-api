@@ -6,7 +6,7 @@ from apps.auth_app.models import User
 from apps.todo_app.config import MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH, \
     MIN_DEADLINE_DELTA
 from apps.todo_app.models import ToDo
-from apps.todo_app.utils import normalize_validated_reminders, get_user_reminders
+from apps.todo_app.utils import get_user_reminders, normalize_reminders_permissive
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -89,7 +89,7 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
         raw_reminders = attrs.get('reminders', None)
         if 'reminders' in raw_initial:
             try:
-                normalized = normalize_validated_reminders(raw_reminders)
+                normalized = normalize_reminders_permissive(raw_reminders)
             except ValidationError as exc:
                 raise ValidationError(exc.detail)
         else:

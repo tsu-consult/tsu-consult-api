@@ -11,14 +11,20 @@ from apps.todo_app.config import MAX_REMINDERS, TEACHER_DEFAULT_REMINDERS, DEAN_
 logger = logging.getLogger(__name__)
 
 
-def normalize_and_sort_reminders(reminders: Optional[List[Dict[str, Any]]]) -> List[Dict[str, int]]:
+def validate_and_normalize_reminders(reminders: Optional[List[Dict[str, Any]]]) -> List[Dict[str, int]]:
     """
-    Convert reminders to uniform dicts with int minutes, filter invalid and sort by minutes ascending.
+    Validate and normalize a list of reminder dicts.
 
-    :param reminders: Input reminders (may contain string minutes or invalid entries).
+    This function validates each item in ``reminders``, converts the ``minutes`` value to an integer,
+    filters invalid or duplicate entries, sorts the remaining reminders by ascending minutes and limits
+    the result to ``MAX_REMINDERS``.
+
+    :param reminders: List of reminder dicts to validate and normalize.
     :type reminders: Optional[List[Dict[str, Any]]]
-    :return: Sorted and filtered reminders with integer minutes limited to MAX_REMINDERS.
-    :rtype: List[Dict[str, Any]]
+    :return: A list of normalized reminder dicts (each with keys ``method`` and ``minutes``).
+    :rtype: List[Dict[str, int]]
+    :raises ValidationError: If no valid reminders remain after validation; the error payload
+        contains per-item error messages when available.
     """
     if not reminders:
         return []
@@ -72,19 +78,17 @@ def normalize_and_sort_reminders(reminders: Optional[List[Dict[str, Any]]]) -> L
     return normalized[:MAX_REMINDERS]
 
 
-def normalize_validated_reminders(reminders: Optional[List[Dict[str, any]]]) -> List[Dict[str, int]]:
+def normalize_reminders_permissive(reminders: Optional[List[Dict[str, any]]]) -> List[Dict[str, int]]:
     """
-    Normalize and filter a list of reminders, assuming prior validation.
+    Permissively normalize a list of reminder dicts.
 
-    This function converts reminders to uniform dicts with integer 'minutes', filters out invalid or duplicate entries,
-    and sorts the result by ascending minutes. Unlike `normalize_and_sort_reminders`, this function silently skips
-    invalid entries (e.g., non-dict items, missing or non-integer 'minutes') and does not accumulate error details.
-    Use this function when reminders have already been validated or when you want to ignore invalid entries without
-    raising detailed errors.
+    This function converts reminder entries to a uniform form (``{'method': str, 'minutes': int}``),
+    silently skips invalid or non-dict entries and removes duplicates, sorts by minutes ascending and
+    limits the result to ``MAX_REMINDERS``.
 
-    :param reminders: Input reminders (may contain string minutes or invalid entries).
+    :param reminders: List of reminder dicts to normalize.
     :type reminders: Optional[List[Dict[str, Any]]]
-    :return: Sorted and filtered reminders with integer minutes, limited to MAX_REMINDERS.
+    :return: A list of normalized reminder dicts (each with keys ``method`` and ``minutes``).
     :rtype: List[Dict[str, int]]
     :raises ValidationError: If no valid reminders remain after filtering.
     """
