@@ -4,20 +4,20 @@ import math
 from datetime import timedelta
 from typing import Optional, List, Dict, Any, Tuple
 
+from celery.exceptions import CeleryError
 from django.utils import timezone
 from google.auth.exceptions import RefreshError, GoogleAuthError
+from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from google.auth.transport.requests import Request as GoogleRequest
-from celery.exceptions import CeleryError
 
 from apps.notification_app.models import Notification
 from apps.profile_app.models import GoogleToken
+from apps.todo_app.config import ALLOWED_MINUTES
 from apps.todo_app.models import ToDo
 from apps.todo_app.utils import normalize_reminders_for_fallback
-from apps.todo_app.config import ALLOWED_MINUTES
-from core.exceptions import GoogleCalendarAuthRequired
+from core.exceptions import GoogleCalendarAuthRequired, EventNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +328,54 @@ class GoogleCalendarService:
                 exc,
             )
         return None
+
+    def get_event(self, event_id: str):
+        if not event_id:
+            raise ValueError("event_id must be provided")
+
+        try:
+            self._ensure_credentials_valid()
+        except RefreshError:
+            raise
+
+        if not self.service:
+            raise GoogleCalendarAuthRequired()
+
+        if not self.calendar_id:
+            try:
+                self._get_or_create_calendar()
+            except HttpError:
+                raise
+
+        try:
+            return self.service.events().get(calendarId=self.calendar_id, eventId=event_id).execute()
+        except RefreshError:
+            self._handle_refresh_error()
+        except HttpError as e:
+            status = None
+            try:
+                status_raw = getattr(e.resp, 'status', None)
+                if status_raw is not None:
+                    status = int(status_raw)
+            except (AttributeError, TypeError, ValueError):
+                status = None
+
+            if status == 404:
+                raise EventNotFound(event_id)
+            if status in (401, 403):
+                self._handle_refresh_error()
+
+            logger.exception(
+                "Google API HttpError while getting event for user id=%s, event_id=%s: %s",
+                getattr(self.user, 'id', None), event_id, e,
+            )
+            raise
+        except (ValueError, TypeError) as exc:
+            logger.exception(
+                "Invalid data while getting event for user id=%s, event_id=%s: %s",
+                getattr(self.user, 'id', None), event_id, exc,
+            )
+            raise
 
     def edit_event(self):
         return True

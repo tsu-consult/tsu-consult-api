@@ -32,6 +32,8 @@ class ToDo(models.Model):
 
     calendar_event_id = models.CharField(max_length=255, null=True, blank=True)
     assignee_calendar_event_id = models.CharField(max_length=255, null=True, blank=True)
+    calendar_event_active = models.BooleanField(default=False)
+    assignee_calendar_event_active = models.BooleanField(default=False)
     reminders = models.JSONField(null=True, blank=True)
     assignee_reminders = models.JSONField(null=True, blank=True)
 
@@ -64,9 +66,11 @@ class ToDo(models.Model):
                 event_id = calendar_service.create_event(self, reminders=reminders)
 
             if event_id:
-                field = "calendar_event_id" if for_creator else "assignee_calendar_event_id"
-                setattr(self, field, event_id)
-                self.save(update_fields=[field])
+                id_field = "calendar_event_id" if for_creator else "assignee_calendar_event_id"
+                active_field = "calendar_event_active" if for_creator else "assignee_calendar_event_active"
+                setattr(self, id_field, event_id)
+                setattr(self, active_field, True)
+                self.save(update_fields=[id_field, active_field])
                 return event_id
         except (AttributeError, TypeError, ValueError) as exc:
             logger.exception("Calendar sync failed for todo id=%s: %s", getattr(self, 'id', '<unknown>'), exc)
