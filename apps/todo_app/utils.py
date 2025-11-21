@@ -131,7 +131,7 @@ def get_user_reminders(user: Any,
                        initial: Optional[Dict[str, Any]],
                        reminders: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     """
-    Determine which reminders should be used for a user's ToDo.
+    Determine which reminders should be used for a user's To Do.
 
     :param user: User object which is expected to have a ``role`` attribute.
     :param initial: Raw request data used to determine whether the ``reminders`` field was provided.
@@ -152,16 +152,16 @@ def get_user_reminders(user: Any,
     return []
 
 
-def sync_and_handle_event(todo: Any,
+def sync_and_handle_event(td: Any,
                           calendar_service: Any,
                           reminders: Optional[List[Dict[str, Any]]],
                           target_user: Any,
                           for_creator: bool = False) -> Optional[str]:
     """
-    Sync a ToDo event to a calendar and schedule fallback reminders on failure.
+    Sync a To Do event to a calendar and schedule fallback reminders on failure.
 
-    :param todo: ToDo instance to sync. Must have a ``deadline`` attribute.
-    :type todo: apps.todo_app.models.ToDo
+    :param td: To Do instance to sync. Must have a ``deadline`` attribute.
+    :type td: apps.todo_app.models.ToDo
     :param calendar_service: Calendar service instance (e.g. ``GoogleCalendarService``) which exposes ``.service``.
     :type calendar_service: Any
     :param reminders: Reminders to apply for the calendar event. If ``None``, defaults are used by the service.
@@ -169,7 +169,7 @@ def sync_and_handle_event(todo: Any,
     :param target_user: User who should receive fallback (Telegram) notifications if calendar sync fails.
     :type target_user: Any
     :param for_creator: If True, the event is intended for the creator and the created event id will be
-        saved into the todo's ``creator_calendar_event_id`` via ``todo.sync_calendar_event``.
+        saved into the to do's ``creator_calendar_event_id`` via ``todo.sync_calendar_event``.
     :type for_creator: bool
 
     :return: The created calendar event id when successful, otherwise ``None``.
@@ -178,37 +178,37 @@ def sync_and_handle_event(todo: Any,
     :raises Exception: If scheduling fallback reminders or other unexpected errors occur (may be propagated).
     """
 
-    if not getattr(todo, 'deadline', None):
+    if not getattr(td, 'deadline', None):
         return None
 
     event_id = None
 
     if getattr(calendar_service, 'service', None):
         try:
-            event_id = todo.create_calendar_event(calendar_service, reminders=reminders, for_creator=for_creator)
+            event_id = td.create_calendar_event(calendar_service, reminders=reminders, for_creator=for_creator)
         except (HttpError, GoogleCalendarAuthRequired) as exc:
             logger.exception("Calendar sync failed for todo id=%s with Google API error: %s",
-                             getattr(todo, 'id', '<unknown>'), exc)
-            if getattr(todo, 'deadline', None) and reminders:
+                             getattr(td, 'id', '<unknown>'), exc)
+            if getattr(td, 'deadline', None) and reminders:
                 try:
                     from apps.todo_app.services import FallbackReminderService
-                    FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=target_user)
+                    FallbackReminderService().schedule_fallback_reminders(td, reminders, target_user=target_user)
                 except Exception as exc2:
                     logger.exception("Failed to schedule fallback reminders after Google API error for todo id=%s: %s",
-                                     getattr(todo, 'id', '<unknown>'), exc2)
+                                     getattr(td, 'id', '<unknown>'), exc2)
             raise
         except Exception as exc:
-            logger.exception("Calendar sync failed for todo id=%s: %s", getattr(todo, 'id', '<unknown>'), exc)
+            logger.exception("Calendar sync failed for todo id=%s: %s", getattr(td, 'id', '<unknown>'), exc)
             event_id = None
 
-    if ((not getattr(calendar_service, 'service', None) or event_id is None) and getattr(todo, 'deadline', None)
+    if ((not getattr(calendar_service, 'service', None) or event_id is None) and getattr(td, 'deadline', None)
             and reminders):
         try:
             from apps.todo_app.services import FallbackReminderService
-            FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=target_user)
+            FallbackReminderService().schedule_fallback_reminders(td, reminders, target_user=target_user)
         except Exception as exc:
             logger.exception("Failed to schedule fallback reminders for todo id=%s: %s",
-                             getattr(todo, 'id', '<unknown>'), exc)
+                             getattr(td, 'id', '<unknown>'), exc)
             raise
 
     return event_id

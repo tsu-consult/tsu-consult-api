@@ -27,50 +27,19 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
-def _save_last_sync_error(todo, e):
-    todo.last_sync_error = str(e)
+def _save_last_sync_error(todo: ToDo, exc):
     try:
-        todo.save(update_fields=["last_sync_error"])
-    except DatabaseError as exc:
-        logger.exception("Failed saving last_sync_error for todo %s: %s", getattr(todo, 'id', None), exc)
+        todo.last_sync_error = str(exc)
+        todo.save(update_fields=["last_error"])
+    except Exception as e:
+        logger.exception("Failed to save last_sync_error for todo %s: %s", getattr(todo, "id", None), e)
 
 
-def _safe_find_event(calendar_service, todo):
-    if not hasattr(calendar_service, 'find_event_for_todo'):
-        return None
-    try:
-        return calendar_service.find_event_for_todo(todo)
-    except (HttpError, RequestException, ValueError, TypeError) as exc:
-        logger.debug("safe_find_event failed for todo %s: %s", getattr(todo, 'id', None), exc)
-        return None
-
-
-def _handle_auth_required(todo, user_ident, role, e):
-    _save_last_sync_error(todo, e)
-    logger.info("Google auth required for user %s, todo %s (%s): %s", user_ident, todo.id, role, e)
-
-
-def _handle_request_and_retry(task_self, todo, user_ident, role, e):
-    _save_last_sync_error(todo, e)
-    logger.warning("Network error while creating event for todo %s (%s) for user %s: %s",
-                   todo.id, role, user_ident, e)
-    retries = getattr(task_self.request, 'retries', 0) if task_self else 0
-    countdown = min(2 ** retries * 60, 3600)
-    if task_self:
-        raise task_self.retry(exc=e, countdown=countdown)
-    raise e
-
-
-def _handle_http_error(todo, user_ident, role, e):
-    _save_last_sync_error(todo, e)
-    logger.exception("Google API error while creating event for todo %s (%s) for user %s: %s",
-                     todo.id, role, user_ident, e)
-
-
-def _handle_invalid_data(todo, user_ident, role, e):
-    _save_last_sync_error(todo, e)
-    logger.exception("Invalid data while creating event for todo %s (%s) for user %s: %s",
-                     todo.id, role, user_ident, e)
+def _ensure_future_deadline(todo: ToDo) -> bool:
+    if not getattr(todo, "deadline", None):
+        return False
+    now = timezone.now()
+    return todo.deadline > now
 
 
 @shared_task(bind=True, max_retries=5, default_retry_delay=60)
@@ -121,317 +90,237 @@ def retry_pending_notifications():
 
 
 @shared_task(bind=True, max_retries=5, default_retry_delay=60)
-def sync_existing_todos(self, user_id):
-    logger.info("sync_existing_todos start for user_id=%s, retries=%s", user_id, getattr(self.request, 'retries', 0))
-
+def sync_existing_todos(self, user_id: int):
+    logger.info("sync_existing_todos start for user_id=%s retries=%s",
+                user_id, getattr(self.request, "retries", 0))
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
-        logger.warning("User with id=%s does not exist", user_id)
+        logger.warning("User %s does not exist, abort sync_existing_todos", user_id)
         return
-    except (ValueError, TypeError):
-        logger.exception("Invalid user_id passed to sync_existing_todos: %s", user_id)
+    except Exception as exc:
+        logger.exception("Unexpected error loading user %s: %s", user_id, exc)
         return
 
     creator_qs = ToDo.objects.filter(creator=user)
     assignee_qs = ToDo.objects.filter(assignee=user)
-
     processed = set()
 
-    for todo in creator_qs:
-        if todo.id in processed:
-            continue
-        processed.add(todo.id)
+    def process_role(td: ToDo, role: str, participant_user):
+        if td.id in processed:
+            return
+        processed.add(td.id)
 
-        if not todo.deadline:
-            continue
+        if not _ensure_future_deadline(td):
+            logger.debug("skip todo %s: no future deadline", td.id)
+            return
 
-        reminders = normalize_reminders_permissive(todo.reminders)
-        calendar_service = GoogleCalendarService(user)
+        if role == "creator":
+            raw_reminders = getattr(td, "creator_reminders", None) if (
+                hasattr(td, "creator_reminders")) else getattr(td, "reminders", None)
+            event_field = "creator_calendar_event_id" if (
+                hasattr(td, "creator_calendar_event_id")) else "calendar_event_id"
+            active_field = "creator_calendar_event_active" if (
+                hasattr(td, "creator_calendar_event_active")) else "calendar_event_active"
+        else:
+            raw_reminders = getattr(td, "assignee_reminders", None) if (
+                hasattr(td, "assignee_reminders")) else getattr(td, "reminders", None)
+            event_field = "assignee_calendar_event_id" if (
+                hasattr(td, "assignee_calendar_event_id")) else "calendar_event_id"
+            active_field = "assignee_calendar_event_active" if (
+                hasattr(td, "assignee_calendar_event_active")) else "calendar_event_active"
 
-        if not calendar_service.service:
-            todo.last_sync_error = "no_calendar_service"
-            todo.save(update_fields=["last_sync_error"])
-            logger.info("No calendar service for user %s when syncing todo %s (creator)", user_id, todo.id)
-            continue
+        reminders = normalize_reminders_permissive(raw_reminders)
 
-        try:
-            if todo.calendar_event_id:
+        calendar_service = GoogleCalendarService(user=participant_user)
+
+        if not getattr(calendar_service, "service", None):
+            if getattr(td, event_field, None):
                 try:
-                    calendar_service.get_event(todo.calendar_event_id)
-                    if not getattr(todo, 'calendar_event_active', True):
-                        todo.calendar_event_active = True
-                        todo.save(update_fields=['calendar_event_active'])
-                        logger.info("Re-activated existing calendar event for todo %s (creator)", todo.id)
-                    else:
-                        logger.debug("Existing calendar event verified for todo %s (creator)", todo.id)
-                    continue
-                except EventNotFound:
-                    try:
-                        existing = _safe_find_event(calendar_service, todo)
-                    except (HttpError, RequestException, ValueError, TypeError) as exc:
-                        existing = None
-                        logger.debug(
-                            "find_event_for_todo raised while handling EventNotFound for todo %s: %s",
-                            todo.id, exc,
-                        )
-
-                    if existing:
-                        eid = existing.get('id')
-                        todo.calendar_event_id = eid
-                        todo.calendar_event_active = True
-                        todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
-                        logger.info("Found existing calendar event for todo %s -> calendar_event_id=%s (creator)",
-                                    todo.id, eid)
-                        continue
-
-                    try:
-                        event_id = calendar_service.create_event(todo, reminders)
-                        if event_id:
-                            todo.calendar_event_id = event_id
-                            todo.calendar_event_active = True
-                            todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
-                            logger.info(
-                                "Re-created calendar event for todo %s -> calendar_event_id=%s (creator)",
-                                todo.id, event_id,
-                            )
-                            continue
-                        todo.last_sync_error = "create_event_failed"
-                        todo.save(update_fields=["last_sync_error"])
-                        logger.warning("create_event returned None for todo %s (creator) user %s", todo.id, user_id)
-                        continue
-                    except (RefreshError, GoogleCalendarAuthRequired) as e:
-                        _handle_auth_required(todo, user_id, 'creator', e)
-                        continue
-                    except RequestException as e:
-                        _handle_request_and_retry(self, todo, user_id, 'creator', e)
-                    except HttpError as e:
-                        _handle_http_error(todo, user_id, 'creator', e)
-                        continue
-                    except (ValueError, TypeError) as e:
-                        _handle_invalid_data(todo, user_id, 'creator', e)
-                        continue
+                    setattr(td, event_field, None)
+                    if hasattr(td, active_field):
+                        setattr(td, active_field, False)
+                    update_fields = [f for f in (event_field, active_field) if hasattr(td, f)]
+                    td.save(update_fields=update_fields)
+                    logger.info("Cleared %s for todo %s because user %s has no calendar service",
+                                event_field, td.id, getattr(participant_user, "id", None))
+                except Exception as e:
+                    logger.exception("Failed clearing calendar fields for todo %s: %s", td.id, e)
             else:
-                try:
-                    try:
-                        existing = _safe_find_event(calendar_service, todo)
-                    except (HttpError, RequestException, ValueError, TypeError) as exc:
-                        existing = None
-                        logger.debug("find_event_for_todo raised while syncing todo %s (creator): %s", todo.id, exc)
-
-                    if existing:
-                        eid = existing.get('id')
-                        todo.calendar_event_id = eid
-                        todo.calendar_event_active = True
-                        todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
-                        logger.info("Found existing calendar event for todo %s -> calendar_event_id=%s (creator)",
-                                    todo.id, eid)
-                        continue
-                    try:
-                        event_id = calendar_service.create_event(todo, reminders)
-                        if event_id:
-                            todo.calendar_event_id = event_id
-                            todo.calendar_event_active = True
-                            todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
-                            logger.info(
-                                "Created calendar event for todo %s -> calendar_event_id=%s (creator)",
-                                todo.id, event_id,
-                            )
-                            continue
-                        todo.last_sync_error = "create_event_failed"
-                        todo.save(update_fields=["last_sync_error"])
-                        logger.warning("create_event returned None for todo %s (creator) user %s", todo.id, user_id)
-                        continue
-                    except (RefreshError, GoogleCalendarAuthRequired) as e:
-                        _handle_auth_required(todo, user_id, 'creator', e)
-                        continue
-                    except RequestException as e:
-                        _handle_request_and_retry(self, todo, user_id, 'creator', e)
-                    except HttpError as e:
-                        _handle_http_error(todo, user_id, 'creator', e)
-                        continue
-                    except (ValueError, TypeError) as e:
-                        _handle_invalid_data(todo, user_id, 'creator', e)
-                        continue
-                except RequestException as e:
-                    _handle_request_and_retry(self, todo, user_id, 'creator', e)
-                except HttpError as e:
-                    _handle_http_error(todo, user_id, 'creator', e)
-                    continue
-                except (ValueError, TypeError) as e:
-                    _handle_invalid_data(todo, user_id, 'creator', e)
-                    continue
-
-        except (RefreshError, GoogleCalendarAuthRequired) as e:
-            _handle_auth_required(todo, user_id, 'creator', e)
-            continue
-        except RequestException as e:
-            _handle_request_and_retry(self, todo, user_id, 'creator', e)
-        except HttpError as e:
-            _handle_http_error(todo, user_id, 'creator', e)
-            continue
-        except (ValueError, TypeError) as e:
-            _handle_invalid_data(todo, user_id, 'creator', e)
-            continue
-
-    for todo in assignee_qs:
-        if todo.id in processed:
-            continue
-        processed.add(todo.id)
-
-        if not todo.deadline:
-            continue
-
-        reminders = normalize_reminders_permissive(todo.assignee_reminders)
-        calendar_service = GoogleCalendarService(todo.assignee)
-
-        if not calendar_service.service:
-            todo.last_sync_error = "no_calendar_service"
-            todo.save(update_fields=["last_sync_error"])
-            logger.info("No calendar service for assignee %s when syncing todo %s",
-                        getattr(todo.assignee, 'id', None), todo.id)
-            continue
+                logger.debug("No calendar service and no event id for todo %s (role=%s)", td.id, role)
+            return
 
         try:
-            if todo.assignee_calendar_event_id:
+            existing_event_id = getattr(td, event_field, None)
+            if existing_event_id:
                 try:
-                    calendar_service.get_event(todo.assignee_calendar_event_id)
-                    if not getattr(todo, 'assignee_calendar_event_active', True):
-                        todo.assignee_calendar_event_active = True
-                        todo.save(update_fields=['assignee_calendar_event_active'])
-                        logger.info("Re-activated existing calendar event for todo %s (assignee)", todo.id)
-                    else:
-                        logger.debug("Existing calendar event verified for todo %s (assignee)", todo.id)
-                    continue
+                    if hasattr(td, active_field):
+                        if not getattr(td, active_field, True):
+                            setattr(td, active_field, True)
+                            td.save(update_fields=[active_field])
+                            logger.info("Re-activated calendar event for todo %s (role=%s)", td.id, role)
+                        else:
+                            logger.debug("Verified existing event for todo %s (role=%s)", td.id, role)
+                    if hasattr(calendar_service, "edit_event"):
+                        try:
+                            calendar_service.edit_event()
+                            # TODO: calendar_service.edit_event(todo, existing_event_id, reminders=reminders)
+                        except Exception as e:
+                            logger.debug("edit_event failed/absent for todo %s: %s", td.id, e)
+                    return
                 except EventNotFound:
+                    logger.info("Stored event_id %s for todo %s not found in Google, will search or recreate",
+                                existing_event_id, td.id)
                     try:
-                        existing = _safe_find_event(calendar_service, todo)
-                    except (HttpError, RequestException, ValueError, TypeError) as exc:
-                        existing = None
-                        logger.debug("find_event_for_todo raised while handling EventNotFound for assignee todo %s: %s",
-                                     todo.id, exc)
+                        found = calendar_service.find_event_for_todo(td) if (
+                            hasattr(calendar_service, "find_event_for_todo")) else None
+                    except (RequestException, HttpError, ValueError, TypeError) as e:
+                        logger.debug("find_event_for_todo failed when handling missing event for todo %s: %s",
+                                     td.id, e)
+                        found = None
 
-                    if existing:
-                        eid = existing.get('id')
-                        todo.assignee_calendar_event_id = eid
-                        todo.assignee_calendar_event_active = True
-                        todo.save(update_fields=['assignee_calendar_event_id', 'assignee_calendar_event_active'])
-                        logger.info("Found existing calendar event for todo %s -> assignee_calendar_event_id=%s ("
-                                    "assignee)", todo.id, eid)
-                        continue
+                    if found:
+                        eid = found.get("id")
+                        try:
+                            setattr(td, event_field, eid)
+                            if hasattr(td, active_field):
+                                setattr(td, active_field, True)
+                            update_fields = [f for f in (event_field, active_field) if hasattr(td, f)]
+                            td.save(update_fields=update_fields)
+                            logger.info("Attached found existing event %s -> todo %s (role=%s)",
+                                        eid, td.id, role)
+                        except Exception as e:
+                            logger.exception("Failed attaching found event id %s to todo %s: %s",
+                                             eid, td.id, e)
+                        return
 
                     try:
-                        event_id = calendar_service.create_event(todo, reminders)
-                        if event_id:
-                            todo.assignee_calendar_event_id = event_id
-                            todo.assignee_calendar_event_active = True
-                            todo.save(update_fields=['assignee_calendar_event_id', 'assignee_calendar_event_active'])
-                            logger.info(
-                                "Re-created calendar event for todo %s -> assignee_calendar_event_id=%s (assignee)",
-                                todo.id, event_id,
-                            )
-                            continue
-                        todo.last_sync_error = "create_event_failed"
-                        todo.save(update_fields=["last_sync_error"])
-                        logger.warning("create_event returned None for todo %s (assignee) user %s",
-                                       todo.id, getattr(todo.assignee, 'id', None))
-                        continue
-                    except (RefreshError, GoogleCalendarAuthRequired) as e:
-                        todo.last_sync_error = str(e)
-                        todo.save(update_fields=["last_sync_error"])
-                        logger.info("Google auth required for assignee %s, todo %s: %s",
-                                    getattr(todo.assignee, 'id', None), todo.id, e)
-                        continue
+                        created_id = calendar_service.create_event(td, reminders=reminders)
+                        if created_id:
+                            setattr(td, event_field, created_id)
+                            if hasattr(td, active_field):
+                                setattr(td, active_field, True)
+                            update_fields = [f for f in (event_field, active_field) if hasattr(td, f)]
+                            td.save(update_fields=update_fields)
+                            logger.info("Re-created calendar event %s for todo %s (role=%s)",
+                                        created_id, td.id, role)
+                        else:
+                            _save_last_sync_error(td, "create_event_returned_none")
+                            logger.warning("create_event returned None for todo %s (role=%s)",
+                                           td.id, role)
+                        return
+                    except RefreshError as e:
+                        _save_last_sync_error(td, e)
+                        logger.info("RefreshError while recreating event for todo %s (role=%s): %s",
+                                    td.id, role, e)
+                        return
                     except RequestException as e:
-                        todo.last_sync_error = str(e)
-                        todo.save(update_fields=["last_sync_error"])
-                        logger.warning("Network error while creating event for todo %s (assignee) for user %s: %s",
-                                       todo.id, getattr(todo.assignee, 'id', None), e)
-                        retries = getattr(self.request, 'retries', 0)
+                        _save_last_sync_error(td, e)
+                        logger.warning("Network error while recreating event for todo %s (role=%s): %s",
+                                       td.id, role, e)
+                        retries = getattr(self.request, "retries", 0)
                         countdown = min(2 ** retries * 60, 3600)
                         raise self.retry(exc=e, countdown=countdown)
                     except HttpError as e:
-                        todo.last_sync_error = str(e)
-                        todo.save(update_fields=["last_sync_error"])
-                        logger.exception(
-                            "Google API error while creating event for todo %s (assignee) for user %s: %s",
-                            todo.id, getattr(todo.assignee, 'id', None), e,
-                        )
-                        continue
-                    except (ValueError, TypeError) as e:
-                        todo.last_sync_error = str(e)
-                        todo.save(update_fields=["last_sync_error"])
-                        logger.exception(
-                            "Invalid data while creating event for todo %s (assignee) for user %s: %s",
-                            todo.id, getattr(todo.assignee, 'id', None), e,
-                        )
-                        continue
+                        _save_last_sync_error(td, e)
+                        logger.exception("Google HttpError while recreating event for todo %s (role=%s): %s",
+                                         td.id, role, e)
+                        return
+                    except Exception as e:
+                        _save_last_sync_error(td, e)
+                        logger.exception("Unexpected error while recreating event for todo %s (role=%s): %s",
+                                         td.id, role, e)
+                        return
             else:
                 try:
-                    event_id = calendar_service.create_event(todo, reminders)
-                    if event_id:
-                        todo.assignee_calendar_event_id = event_id
-                        todo.assignee_calendar_event_active = True
-                        todo.save(update_fields=["assignee_calendar_event_id", 'assignee_calendar_event_active'])
-                        logger.info("Synced todo %s -> assignee_calendar_event_id=%s", todo.id, event_id)
-                    else:
-                        todo.last_sync_error = "create_event_failed"
-                        todo.save(update_fields=["last_sync_error"])
-                        logger.warning("create_event returned None for todo %s (assignee) user %s",
-                                       todo.id, getattr(todo.assignee, 'id', None))
-                        continue
-                except (RefreshError, GoogleCalendarAuthRequired) as e:
-                    todo.last_sync_error = str(e)
-                    todo.save(update_fields=["last_sync_error"])
+                    found = calendar_service.find_event_for_todo(td) if (
+                        hasattr(calendar_service, "find_event_for_todo")) else None
+                except (RequestException, HttpError, ValueError, TypeError) as e:
+                    logger.debug("find_event_for_todo failed while syncing todo %s: %s", td.id, e)
+                    found = None
+
+                if found:
+                    eid = found.get("id")
                     try:
-                        existing = _safe_find_event(calendar_service, todo)
-                    except (HttpError, RequestException, ValueError, TypeError):
-                        existing = None
+                        setattr(td, event_field, eid)
+                        if hasattr(td, active_field):
+                            setattr(td, active_field, True)
+                        update_fields = [f for f in (event_field, active_field) if hasattr(td, f)]
+                        td.save(update_fields=update_fields)
+                        logger.info("Found and attached event %s -> todo %s (role=%s)", eid, td.id, role)
+                    except Exception as e:
+                        logger.exception("Failed attaching found event id %s to todo %s: %s", eid, td.id, e)
+                    return
 
-                    if existing:
-                        eid = existing.get('id')
-                        todo.assignee_calendar_event_id = eid
-                        todo.assignee_calendar_event_active = True
-                        todo.save(update_fields=["assignee_calendar_event_id", 'assignee_calendar_event_active'])
-                        logger.info("Found existing calendar event for todo %s -> assignee_calendar_event_id=%s ("
-                                    "assignee)", todo.id, eid)
-                        continue
-
-                    logger.exception("Google API error while syncing todo %s for assignee %s: %s", todo.id,
-                                     getattr(todo.assignee, 'id', None), e)
-                    continue
-                except (ValueError, TypeError) as e:
-                    todo.last_sync_error = str(e)
-                    todo.save(update_fields=["last_sync_error"])
-                    logger.exception("Invalid data while syncing todo %s for assignee %s: %s", todo.id,
-                                     getattr(todo.assignee, 'id', None), e)
-                    continue
+                try:
+                    created_id = calendar_service.create_event(td, reminders=reminders)
+                    if created_id:
+                        setattr(td, event_field, created_id)
+                        if hasattr(td, active_field):
+                            setattr(td, active_field, True)
+                        update_fields = [f for f in (event_field, active_field) if hasattr(td, f)]
+                        td.save(update_fields=update_fields)
+                        logger.info("Created calendar event %s for todo %s (role=%s)",
+                                    created_id, td.id, role)
+                    else:
+                        _save_last_sync_error(td, "create_event_returned_none")
+                        logger.warning("create_event returned None for todo %s (role=%s)", td.id, role)
+                except RefreshError as e:
+                    _save_last_sync_error(td, e)
+                    logger.info("RefreshError creating event for todo %s (role=%s): %s", td.id, role, e)
+                except RequestException as e:
+                    _save_last_sync_error(td, e)
+                    logger.warning("Network error creating event for todo %s (role=%s): %s",
+                                   td.id, role, e)
+                    retries = getattr(self.request, "retries", 0)
+                    countdown = min(2 ** retries * 60, 3600)
+                    raise self.retry(exc=e, countdown=countdown)
+                except HttpError as e:
+                    _save_last_sync_error(td, e)
+                    logger.exception("Google HttpError creating event for todo %s (role=%s): %s",
+                                     td.id, role, e)
+                except Exception as e:
+                    _save_last_sync_error(td, e)
+                    logger.exception("Unexpected error creating event for todo %s (role=%s): %s",
+                                     td.id, role, e)
         except (RefreshError, GoogleCalendarAuthRequired) as e:
-            todo.last_sync_error = str(e)
-            todo.save(update_fields=["last_sync_error"])
-            logger.info("Google auth required for assignee %s, todo %s: %s",
-                        getattr(todo.assignee, 'id', None), todo.id, e)
-            continue
+            _save_last_sync_error(td, e)
+            logger.info("Google auth required for user %s when syncing todo %s (role=%s): %s",
+                        getattr(participant_user, "id", None), td.id, role, e)
+            return
         except RequestException as e:
-            todo.last_sync_error = str(e)
-            todo.save(update_fields=["last_sync_error"])
-            logger.warning("Network error while syncing todo %s for assignee %s: %s", todo.id,
-                           getattr(todo.assignee, 'id', None), e)
-            retries = getattr(self.request, 'retries', 0)
+            _save_last_sync_error(td, e)
+            logger.warning("Network error while syncing todo %s (role=%s): %s", td.id, role, e)
+            retries = getattr(self.request, "retries", 0)
             countdown = min(2 ** retries * 60, 3600)
             raise self.retry(exc=e, countdown=countdown)
         except HttpError as e:
-            todo.last_sync_error = str(e)
-            todo.save(update_fields=["last_sync_error"])
-            logger.exception("Google API error while syncing todo %s for assignee %s: %s", todo.id,
-                             getattr(todo.assignee, 'id', None), e)
-            continue
+            _save_last_sync_error(td, e)
+            logger.exception("Google HttpError while syncing todo %s (role=%s): %s", td.id, role, e)
+            return
         except (ValueError, TypeError) as e:
-            todo.last_sync_error = str(e)
-            todo.save(update_fields=["last_sync_error"])
-            logger.exception("Invalid data while syncing todo %s for assignee %s: %s", todo.id,
-                             getattr(todo.assignee, 'id', None), e)
+            _save_last_sync_error(td, e)
+            logger.exception("Invalid data while syncing todo %s (role=%s): %s", td.id, role, e)
+            return
+
+    for todo in creator_qs:
+        try:
+            process_role(todo, "creator", user)
+        except Exception as exc:
+            _save_last_sync_error(todo, exc)
+            logger.exception("Unexpected error processing creator todo %s for user %s: %s",
+                             getattr(todo, "id", None), user_id, exc)
+
+    for todo in assignee_qs:
+        assignee_user = getattr(todo, "assignee", None)
+        if not assignee_user:
             continue
+        try:
+            process_role(todo, "assignee", assignee_user)
+        except Exception as exc:
+            _save_last_sync_error(todo, exc)
+            logger.exception("Unexpected error processing assignee todo %s for user %s: %s",
+                             getattr(todo, "id", None), user_id, exc)
 
     logger.info("sync_existing_todos finished for user_id=%s", user_id)
 
@@ -502,7 +391,8 @@ def transfer_unsent_reminders_task(user_id: int):
                     continue
                 try:
                     send_notification_task.delay(n.id)
-                    logger.info("Scheduled immediate notification %s for todo %s", n.id, getattr(todo, 'id', None))
+                    logger.info("Scheduled immediate notification %s for todo %s",
+                                n.id, getattr(todo, 'id', None))
                 except (KombuOperationalError, RedisConnectionError, CeleryError, RuntimeError) as exc:
                     logger.exception(
                         "Failed scheduling immediate notification %s for todo %s: %s",
