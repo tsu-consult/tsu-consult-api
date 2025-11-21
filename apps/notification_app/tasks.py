@@ -2,7 +2,7 @@
 from datetime import timedelta, datetime
 from typing import Optional, Type
 
-from celery import shared_task
+from celery import shared_task, current_app
 from celery.exceptions import CeleryError
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, IntegrityError
@@ -19,6 +19,7 @@ from apps.todo_app.services import GoogleCalendarService
 from apps.todo_app.utils import normalize_reminders_for_fallback
 from apps.todo_app.utils import normalize_reminders_permissive
 from core.exceptions import GoogleCalendarAuthRequired, EventNotFound
+from apps.profile_app.models import GoogleToken
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ User = get_user_model()
 def _save_last_sync_error(todo: ToDo, exc):
     try:
         todo.last_sync_error = str(exc)
-        todo.save(update_fields=["last_error"])
+        todo.save(update_fields=["last_sync_error"])
     except Exception as e:
         logger.exception("Failed to save last_sync_error for todo %s: %s", getattr(todo, "id", None), e)
 
@@ -40,10 +41,12 @@ def _ensure_future_deadline(todo: ToDo) -> bool:
     return todo.deadline > now
 
 
-def _create_or_skip_notification(user_id: Type[int], title: str, message: str, scheduled_for: Optional[datetime]):
+def _create_or_skip_notification(user_id: Type[int], todo: ToDo, title: str,
+                                 message: str, scheduled_for: Optional[datetime]):
     try:
         n, created = Notification.objects.get_or_create(
             user_id=user_id,
+            todo=todo,
             title=title,
             scheduled_for=scheduled_for,
             defaults={
@@ -183,6 +186,11 @@ def sync_existing_todos(self, user_id: int):
             existing_event_id = getattr(td, event_field, None)
             if existing_event_id:
                 try:
+                    try:
+                        calendar_service.get_event(existing_event_id)
+                    except EventNotFound:
+                        raise
+
                     if hasattr(td, active_field):
                         if not getattr(td, active_field, True):
                             setattr(td, active_field, True)
@@ -360,6 +368,13 @@ def transfer_unsent_reminders_task(user_id: int):
     logger.info("transfer_unsent_reminders_task start for user_id=%s", user_id)
 
     try:
+        if GoogleToken.objects.filter(user_id=user_id).exists():
+            logger.info("User %s has GoogleToken again — skipping transfer_unsent_reminders_task", user_id)
+            return
+    except Exception as e:
+        logger.debug("Error checking GoogleToken existence for user %s: %s", user_id, e)
+
+    try:
         creator_qs = ToDo.objects.filter(
             creator_id=user_id, deadline__gt=now, calendar_event_id__isnull=False
         )
@@ -405,18 +420,20 @@ def transfer_unsent_reminders_task(user_id: int):
             title = "Напоминание о задаче"
             message = f'Через {interval_str} наступает дедлайн задачи "{td.title}".'
 
-            n = _create_or_skip_notification(target_user_id, title, message, scheduled_for)
+            n = _create_or_skip_notification(target_user_id, td, title, message, scheduled_for)
             if not n:
                 continue
 
             created_any = True
 
             try:
-                send_notification_task.apply_async(args=[n.id], eta=scheduled_for)
-            except CeleryError as e:
+                celery_task = send_notification_task.apply_async(args=[n.id], eta=scheduled_for)
+                n.celery_task_id = celery_task.id
+                n.save(update_fields=["celery_task_id"])
+            except CeleryError as ex:
                 logger.exception(
                     "Failed to schedule notification %s for todo %s: %s",
-                    n.id, td.id, e
+                    n.id, td.id, ex
                 )
 
         if created_any:
@@ -430,8 +447,8 @@ def transfer_unsent_reminders_task(user_id: int):
                     update_fields.append(active_field)
 
                 td.save(update_fields=update_fields)
-            except DatabaseError as e:
-                logger.exception("Failed to clear calendar fields for todo %s: %s", td.id, e)
+            except DatabaseError as ex:
+                logger.exception("Failed to clear calendar fields for todo %s: %s", td.id, ex)
 
     for t in creator_qs:
         try:
@@ -446,3 +463,40 @@ def transfer_unsent_reminders_task(user_id: int):
             logger.exception("Error processing assignee todo %s: %s", t.id, exc)
 
     logger.info("transfer_unsent_reminders_task finished for user_id=%s", user_id)
+
+
+@shared_task
+def cancel_pending_fallbacks_for_user(user_id: int):
+    qs = Notification.objects.filter(
+        user_id=user_id,
+        type=Notification.Type.TELEGRAM,
+        status=Notification.Status.PENDING,
+        todo__isnull=False,
+    )
+
+    count = qs.count()
+    if count == 0:
+        logger.debug("No pending user fallback notifications to cancel for user %s", user_id)
+        return
+
+    notif_info = ", ".join([f"id={n.id} task={n.celery_task_id}" for n in qs])
+    logger.info("Cancelling %s user fallback notifications for user %s: %s", count, user_id, notif_info)
+
+    for n in qs:
+        revoked = False
+        try:
+            if n.celery_task_id:
+                current_app.control.revoke(n.celery_task_id, terminate=False)
+                revoked = True
+                logger.debug("Revoked celery task %s for notification %s", n.celery_task_id, n.id)
+        except Exception as e:
+            logger.warning("Failed to revoke task %s for notification %s: %s", n.celery_task_id, n.id, e)
+
+        try:
+            n.status = Notification.Status.CANCELLED
+            n.last_error = "Cancelled due to Google Calendar integration re-enabled"
+            n.celery_task_id = None
+            n.save(update_fields=["status", "last_error", "celery_task_id"])
+            logger.debug("Marked notification %s as CANCELLED (revoked=%s)", n.id, revoked)
+        except Exception as e:
+            logger.warning("Failed to update notification %s: %s", n.id, e)

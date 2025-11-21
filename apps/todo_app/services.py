@@ -96,6 +96,7 @@ class FallbackReminderService:
 
                 n = Notification.objects.create(
                     user=target_user,
+                    todo=todo,
                     title="Напоминание о задаче",
                     message=message,
                     type=Notification.Type.TELEGRAM,
@@ -104,7 +105,9 @@ class FallbackReminderService:
                 )
                 try:
                     from apps.notification_app.tasks import send_notification_task
-                    send_notification_task.delay(n.id)
+                    celery_task = send_notification_task.apply_async(args=[n.id])
+                    n.celery_task_id = celery_task.id
+                    n.save(update_fields=["celery_task_id"])
                     logger.info("Scheduled immediate notification %s for todo %s", n.id, todo.id)
                 except (CeleryError, RuntimeError) as e:
                     logger.exception(
@@ -123,7 +126,9 @@ class FallbackReminderService:
             )
             try:
                 from apps.notification_app.tasks import send_notification_task
-                send_notification_task.apply_async(args=[n.id], eta=notify_at)
+                celery_task = send_notification_task.apply_async(args=[n.id], eta=notify_at)
+                n.celery_task_id = celery_task.id
+                n.save(update_fields=["celery_task_id"])
                 logger.info("Scheduled deferred notification %s for todo %s at %s", n.id, todo.id, notify_at)
             except (CeleryError, RuntimeError) as e:
                 logger.exception("Failed scheduling deferred notification %s for todo %s: %s", n.id, todo.id, e)
@@ -140,11 +145,14 @@ class GoogleCalendarService:
         self.creds: Optional[Credentials] = None
 
         if not user or not getattr(user, "is_authenticated", False):
+            logger.debug("GoogleCalendarService: no authenticated user provided (user=%s)",
+                         getattr(user, 'id', None))
             return
 
         try:
             google_token = GoogleToken.objects.get(user=user)
         except GoogleToken.DoesNotExist:
+            logger.info("GoogleCalendarService: no GoogleToken for user id=%s", getattr(user, 'id', None))
             return
 
         try:
@@ -153,6 +161,9 @@ class GoogleCalendarService:
             self._ensure_credentials_valid()
             if self.creds and getattr(self.creds, "valid", False):
                 self.service = build("calendar", "v3", credentials=self.creds)
+            else:
+                logger.warning("GoogleCalendarService: credentials invalid or not refreshable for user id=%s",
+                               getattr(user, 'id', None))
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             logger.exception(
                 "Invalid GoogleToken.credentials for user id=%s: %s", getattr(user, "id", None), exc

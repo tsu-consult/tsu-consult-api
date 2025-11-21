@@ -12,6 +12,7 @@ class Notification(models.Model):
         PENDING = "pending", "Pending"
         SENT = "sent", "Sent"
         FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
 
     id = models.AutoField(primary_key=True)
     user = models.ForeignKey(
@@ -27,6 +28,15 @@ class Notification(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
     scheduled_for = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(null=True, blank=True)
+
+    todo = models.ForeignKey(
+        "todo_app.ToDo",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="notifications"
+    )
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
 
     def __str__(self):
         return f"Notification({self.user_id}, {self.type}, {self.status})"

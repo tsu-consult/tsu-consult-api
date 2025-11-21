@@ -3,10 +3,16 @@ from django.dispatch import receiver
 from django.conf import settings
 from django.utils import timezone
 
+import logging
+from celery.exceptions import CeleryError
+
 from apps.auth_app.models import TeacherApproval
 from apps.notification_app.models import Notification
-from apps.notification_app.tasks import send_notification_task, sync_existing_todos, transfer_unsent_reminders_task
+from apps.notification_app.tasks import (send_notification_task, sync_existing_todos, transfer_unsent_reminders_task,
+                                         cancel_pending_fallbacks_for_user)
 from apps.profile_app.models import GoogleToken
+
+logger = logging.getLogger(__name__)
 
 
 @receiver(post_save, sender=Notification)
@@ -45,6 +51,11 @@ def notify_teacher_on_approval_status(sender, instance: TeacherApproval, created
 
 @receiver(post_save, sender=GoogleToken)
 def sync_after_integration(sender, instance, created, **kwargs):
+    try:
+        cancel_pending_fallbacks_for_user.delay(instance.user.id)
+    except (CeleryError, RuntimeError) as e:
+        logger.warning("Failed to enqueue cancel_pending_fallbacks_for_user "
+                       "for user %s: %s", getattr(instance.user, 'id', None), e)
     sync_existing_todos.delay(instance.user.id)
 
 
