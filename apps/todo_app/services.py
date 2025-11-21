@@ -118,6 +118,7 @@ class FallbackReminderService:
             interval_str = self.humanize_minutes(minutes_int)
             n = Notification.objects.create(
                 user=target_user,
+                todo=todo,
                 title="Напоминание о задаче",
                 message=f'Через {interval_str} наступает дедлайн задачи "{todo.title}".',
                 type=Notification.Type.TELEGRAM,

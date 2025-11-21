@@ -55,14 +55,30 @@ def _create_or_skip_notification(user_id: Type[int], todo: ToDo, title: str,
                 "status": Notification.Status.PENDING,
             },
         )
+
         if created:
             return n
-        logger.debug(
-            "Notification skipped as duplicate: user=%s title=%r scheduled_for=%s",
-            user_id, title, scheduled_for
-        )
+
+        if n.status == Notification.Status.PENDING:
+            logger.debug(
+                "Notification skipped as duplicate (already pending): user=%s title=%r scheduled_for=%s",
+                user_id, title, scheduled_for
+            )
+            return None
+
+        try:
+            n.status = Notification.Status.PENDING
+            n.message = message
+            n.last_error = None
+            n.celery_task_id = None
+            n.save(update_fields=["status", "message", "last_error", "celery_task_id"])
+            logger.info("Reactivated notification %s for user %s todo %s (scheduled_for=%s)", n.id, user_id, getattr(todo, 'id', None), scheduled_for)
+            return n
+        except Exception as exc:
+            logger.exception("Failed to reactivate existing notification %s: %s", getattr(n, 'id', None), exc)
+            return None
     except (IntegrityError, DatabaseError) as exc:
-        logger.exception("DB error while creating Notification: %s", exc)
+        logger.exception("DB error while creating/reactivating Notification: %s", exc)
     return None
 
 
