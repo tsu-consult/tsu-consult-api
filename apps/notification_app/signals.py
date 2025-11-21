@@ -1,11 +1,11 @@
-﻿from django.db.models.signals import post_save
+﻿from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.conf import settings
 from django.utils import timezone
 
 from apps.auth_app.models import TeacherApproval
 from apps.notification_app.models import Notification
-from apps.notification_app.tasks import send_notification_task, sync_existing_todos
+from apps.notification_app.tasks import send_notification_task, sync_existing_todos, transfer_unsent_reminders_task
 from apps.profile_app.models import GoogleToken
 
 
@@ -46,3 +46,8 @@ def notify_teacher_on_approval_status(sender, instance: TeacherApproval, created
 @receiver(post_save, sender=GoogleToken)
 def sync_after_integration(sender, instance, created, **kwargs):
     sync_existing_todos.delay(instance.user.id)
+
+
+@receiver(post_delete, sender=GoogleToken)
+def transfer_unsent_reminders_on_disconnect(sender, instance, **kwargs):
+    transfer_unsent_reminders_task.delay(instance.user.id)

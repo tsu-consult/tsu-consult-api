@@ -11,6 +11,7 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from requests.exceptions import RequestException
 
 from apps.notification_app.models import Notification
 from apps.profile_app.models import GoogleToken
@@ -290,14 +291,46 @@ class GoogleCalendarService:
         if not self.service:
             return None
         if not self.calendar_id:
-            self._get_or_create_calendar()
-        if not self.calendar_id:
-            return None
+            try:
+                self._get_or_create_calendar()
+            except HttpError as exc:
+                logger.exception(
+                    "Google API HttpError while getting/creating system calendar for user id=%s: %s",
+                    getattr(self.user, 'id', None), exc,
+                )
+                return None
+            if not self.calendar_id:
+                logger.warning(
+                    "System calendar not available for user id=%s, skipping event creation",
+                    getattr(self.user, 'id', None),
+                )
+                return None
+
+        try:
+            existing = self.find_event_for_todo(todo)
+        except (HttpError, RequestException, ValueError, TypeError) as exc:
+            existing = None
+            logger.debug("find_event_for_todo raised while creating event for todo %s: %s",
+                         getattr(todo, 'id', None), exc)
+
+        if existing:
+            eid = existing.get('id')
+            logger.debug("create_event: existing event found for todo %s -> %s", getattr(todo, 'id', None), eid)
+            return eid
 
         description = self._format_event_description(todo)
 
         start = self._make_aware_datetime(todo.deadline)
         end = start
+
+        is_creator = bool(self.user and getattr(self.user, 'id', None) == getattr(todo, 'creator_id', None))
+
+        extended_props = {
+            'private': {
+                'todo_id': str(getattr(todo, 'id', '')),
+                'role': 'creator' if is_creator else 'assignee'
+            }
+        }
 
         event_body = {
             "summary": f"[{todo.get_status_display()}] {todo.title} — To Do",
@@ -305,6 +338,7 @@ class GoogleCalendarService:
             "start": {"dateTime": start.isoformat(), "timeZone": self.TIMEZONE},
             "end": {"dateTime": end.isoformat(), "timeZone": self.TIMEZONE},
             "reminders": {"useDefault": False, "overrides": reminders},
+            "extendedProperties": extended_props,
         }
 
         try:
@@ -344,8 +378,14 @@ class GoogleCalendarService:
         if not self.calendar_id:
             try:
                 self._get_or_create_calendar()
-            except HttpError:
+            except HttpError as exc:
+                logger.exception(
+                    "Google API HttpError while getting/creating system calendar for user id=%s: %s",
+                    getattr(self.user, 'id', None), exc,
+                )
                 raise
+            if not self.calendar_id:
+                raise GoogleCalendarAuthRequired()
 
         try:
             return self.service.events().get(calendarId=self.calendar_id, eventId=event_id).execute()
@@ -382,3 +422,42 @@ class GoogleCalendarService:
 
     def delete_event(self):
         return True
+
+    def find_event_for_todo(self, todo: ToDo) -> Optional[Dict[str, Any]]:
+        if not self.service:
+            return None
+
+        if not self.calendar_id:
+            try:
+                self._get_or_create_calendar()
+            except HttpError as exc:
+                logger.exception(
+                    "Google API HttpError while getting/creating system calendar for user id=%s: %s",
+                    getattr(self.user, 'id', None), exc,
+                )
+                return None
+            if not self.calendar_id:
+                return None
+
+        try:
+            query = f"todo_id={getattr(todo, 'id', '')}"
+            resp = self.service.events().list(calendarId=self.calendar_id,
+                                              privateExtendedProperty=query, maxResults=5).execute()
+            items = resp.get('items', []) if resp else []
+            if items:
+                return items[0]
+            return None
+        except RefreshError:
+            self._handle_refresh_error()
+        except HttpError as exc:
+            logger.exception(
+                "Google API HttpError while searching events for todo id=%s user id=%s: %s",
+                getattr(todo, 'id', None), getattr(self.user, 'id', None), exc,
+            )
+            return None
+        except (ValueError, TypeError) as exc:
+            logger.exception(
+                "Invalid data while searching events for todo id=%s user id=%s: %s",
+                getattr(todo, 'id', None), getattr(self.user, 'id', None), exc,
+            )
+            return None
