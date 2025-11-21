@@ -1,14 +1,15 @@
 ﻿import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
+from typing import Optional, Type
 
 from celery import shared_task
+from celery.exceptions import CeleryError
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, IntegrityError
 from django.utils import timezone
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 from requests.exceptions import RequestException
-from rest_framework.exceptions import ValidationError
 
 from apps.notification_app.models import Notification
 from apps.notification_app.services import send_telegram_notification
@@ -18,9 +19,6 @@ from apps.todo_app.services import GoogleCalendarService
 from apps.todo_app.utils import normalize_reminders_for_fallback
 from apps.todo_app.utils import normalize_reminders_permissive
 from core.exceptions import GoogleCalendarAuthRequired, EventNotFound
-from celery.exceptions import CeleryError
-from kombu.exceptions import OperationalError as KombuOperationalError
-from redis.exceptions import ConnectionError as RedisConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +38,37 @@ def _ensure_future_deadline(todo: ToDo) -> bool:
         return False
     now = timezone.now()
     return todo.deadline > now
+
+
+def _create_or_skip_notification(user_id: Type[int], title: str, message: str, scheduled_for: Optional[datetime]):
+    try:
+        n, created = Notification.objects.get_or_create(
+            user_id=user_id,
+            title=title,
+            scheduled_for=scheduled_for,
+            defaults={
+                "message": message,
+                "type": Notification.Type.TELEGRAM,
+                "status": Notification.Status.PENDING,
+            },
+        )
+        if created:
+            return n
+        logger.debug(
+            "Notification skipped as duplicate: user=%s title=%r scheduled_for=%s",
+            user_id, title, scheduled_for
+        )
+    except (IntegrityError, DatabaseError) as exc:
+        logger.exception("DB error while creating Notification: %s", exc)
+    return None
+
+
+def _normalize_unique_minutes(reminders_raw) -> list[int]:
+    try:
+        return normalize_reminders_for_fallback(reminders_raw)
+    except Exception as exc:
+        logger.debug("normalize_reminders_for_fallback failed: %s", exc)
+        return []
 
 
 @shared_task(bind=True, max_retries=5, default_retry_delay=60)
@@ -106,7 +135,7 @@ def sync_existing_todos(self, user_id: int):
     assignee_qs = ToDo.objects.filter(assignee=user)
     processed = set()
 
-    def process_role(td: ToDo, role: str, participant_user):
+    def _process(td: ToDo, role: str, participant_user):
         if td.id in processed:
             return
         processed.add(td.id)
@@ -305,7 +334,7 @@ def sync_existing_todos(self, user_id: int):
 
     for todo in creator_qs:
         try:
-            process_role(todo, "creator", user)
+            _process(todo, "creator", user)
         except Exception as exc:
             _save_last_sync_error(todo, exc)
             logger.exception("Unexpected error processing creator todo %s for user %s: %s",
@@ -316,7 +345,7 @@ def sync_existing_todos(self, user_id: int):
         if not assignee_user:
             continue
         try:
-            process_role(todo, "assignee", assignee_user)
+            _process(todo, "assignee", assignee_user)
         except Exception as exc:
             _save_last_sync_error(todo, exc)
             logger.exception("Unexpected error processing assignee todo %s for user %s: %s",
@@ -328,132 +357,92 @@ def sync_existing_todos(self, user_id: int):
 @shared_task
 def transfer_unsent_reminders_task(user_id: int):
     now = timezone.now()
+    logger.info("transfer_unsent_reminders_task start for user_id=%s", user_id)
 
     try:
-        creator_qs = ToDo.objects.filter(creator_id=user_id, deadline__gt=now, calendar_event_id__isnull=False)
-        assignee_qs = ToDo.objects.filter(assignee_id=user_id, deadline__gt=now,
-                                          assignee_calendar_event_id__isnull=False)
-    except DatabaseError as e:
-        logger.exception("Failed to query ToDo for user %s while transferring reminders: %s", user_id, e)
+        creator_qs = ToDo.objects.filter(
+            creator_id=user_id, deadline__gt=now, calendar_event_id__isnull=False
+        )
+        assignee_qs = ToDo.objects.filter(
+            assignee_id=user_id, deadline__gt=now, assignee_calendar_event_id__isnull=False
+        )
+    except DatabaseError as exc:
+        logger.exception("DB error while querying ToDo: %s", exc)
         return
 
-    def _process_todo_for_role(todo, role):
-        if role == 'creator':
-            reminders_raw = getattr(todo, 'reminders', None)
-            target_user_id = todo.creator_id
+    frs = FallbackReminderService()
+
+    def _process(td: ToDo, role: str):
+        if role == "creator":
+            reminders_raw = td.reminders
+            target_user_id = td.creator_id
+            id_field = "calendar_event_id"
+            active_field = "calendar_event_active"
         else:
-            reminders_raw = getattr(todo, 'assignee_reminders', None)
-            target_user_id = todo.assignee_id
+            reminders_raw = td.assignee_reminders
+            target_user_id = td.assignee_id
+            id_field = "assignee_calendar_event_id"
+            active_field = "assignee_calendar_event_active"
 
-        try:
-            unique_minutes = normalize_reminders_for_fallback(reminders_raw)
-        except ValidationError:
-            logger.debug("No valid reminders for todo %s when transferring for user %s",
-                         getattr(todo, 'id', '<unknown>'), user_id)
-            unique_minutes = []
-
-        if not unique_minutes:
-            logger.debug("Skipping todo %s: no reminders to transfer", getattr(todo, 'id', '<unknown>'))
+        minutes_list = _normalize_unique_minutes(reminders_raw)
+        if not minutes_list:
             return
 
-        frs = FallbackReminderService()
-        for minutes_int in unique_minutes:
-            scheduled = getattr(todo, 'deadline', None)
-            if scheduled is None:
-                continue
-            scheduled_for = scheduled - timedelta(minutes=minutes_int)
+        created_any = False
+
+        for minutes_val in minutes_list:
+            deadline = td.deadline
+            scheduled_for = deadline - timedelta(minutes=minutes_val)
 
             if scheduled_for <= now:
-                remaining_seconds = (todo.deadline - now).total_seconds()
-                if remaining_seconds <= 0:
-                    logger.debug(
-                        "Skipping overdue reminder for todo %s: deadline passed (now=%s, deadline=%s)",
-                        getattr(todo, 'id', None), now, getattr(todo, 'deadline', None),
-                    )
-                    continue
-
-                remaining_minutes = int(__import__('math').ceil(remaining_seconds / 60))
-                interval_str = frs.humanize_minutes(remaining_minutes)
-                message = f'Через {interval_str} наступает дедлайн задачи "{getattr(todo, "title", "")}".'
-
-                try:
-                    n = Notification.objects.create(
-                        user_id=target_user_id,
-                        title=getattr(todo, 'title', 'Напоминание о задаче'),
-                        message=message,
-                        type=Notification.Type.TELEGRAM,
-                        status=Notification.Status.PENDING,
-                        scheduled_for=None,
-                    )
-                except (IntegrityError, DatabaseError) as exc:
-                    logger.exception("Failed to create Notification for todo %s user %s: %s",
-                                     getattr(todo, 'id', '<unknown>'), target_user_id, exc)
-                    continue
-                try:
-                    send_notification_task.delay(n.id)
-                    logger.info("Scheduled immediate notification %s for todo %s",
-                                n.id, getattr(todo, 'id', None))
-                except (KombuOperationalError, RedisConnectionError, CeleryError, RuntimeError) as exc:
-                    logger.exception(
-                        "Failed scheduling immediate notification %s for todo %s: %s",
-                        n.id, getattr(todo, 'id', None), exc
-                    )
-                continue
-
-            interval_str = frs.humanize_minutes(minutes_int)
-            message = f'Через {interval_str} наступает дедлайн задачи "{getattr(todo, "title", "")}".'
-            try:
-                n = Notification.objects.create(
-                    user_id=target_user_id,
-                    title=getattr(todo, 'title', 'Напоминание о задаче'),
-                    message=message,
-                    type=Notification.Type.TELEGRAM,
-                    status=Notification.Status.PENDING,
-                    scheduled_for=scheduled_for,
+                logger.debug(
+                    "Skipping past-due reminder for todo %s user %s (scheduled_for=%s)",
+                    td.id, target_user_id, scheduled_for
                 )
-            except (IntegrityError, DatabaseError) as exc:
-                logger.exception("Failed to create Notification for todo %s user %s: %s",
-                                 getattr(todo, 'id', '<unknown>'), target_user_id, exc)
                 continue
+
+            interval_str = frs.humanize_minutes(minutes_val)
+            title = "Напоминание о задаче"
+            message = f'Через {interval_str} наступает дедлайн задачи "{td.title}".'
+
+            n = _create_or_skip_notification(target_user_id, title, message, scheduled_for)
+            if not n:
+                continue
+
+            created_any = True
 
             try:
                 send_notification_task.apply_async(args=[n.id], eta=scheduled_for)
-                logger.info("Scheduled deferred notification %s for todo %s at %s",
-                            n.id, getattr(todo, 'id', None), scheduled_for)
-            except (KombuOperationalError, RedisConnectionError, CeleryError, RuntimeError) as exc:
-                logger.exception("Failed scheduling deferred notification %s for todo %s: %s",
-                                 n.id, getattr(todo, 'id', None), exc)
+            except CeleryError as e:
+                logger.exception(
+                    "Failed to schedule notification %s for todo %s: %s",
+                    n.id, td.id, e
+                )
 
-        active_field = 'calendar_event_active' if role == 'creator' else 'assignee_calendar_event_active'
-        id_field = 'calendar_event_id' if role == 'creator' else 'assignee_calendar_event_id'
-        try:
-            if hasattr(todo, active_field):
-                if hasattr(todo, id_field):
-                    setattr(todo, id_field, None)
-                setattr(todo, active_field, False)
+        if created_any:
+            try:
                 update_fields = []
-                if hasattr(todo, id_field):
-                    update_fields.append(id_field)
-                update_fields.append(active_field)
-                todo.save(update_fields=update_fields)
-        except DatabaseError as exc:
-            logger.exception("Failed to set inactive flag %s for todo %s: %s", active_field,
-                             getattr(todo, 'id', '<unknown>'), exc)
+                setattr(td, id_field, None)
+                update_fields.append(id_field)
+
+                if hasattr(td, active_field):
+                    setattr(td, active_field, False)
+                    update_fields.append(active_field)
+
+                td.save(update_fields=update_fields)
+            except DatabaseError as e:
+                logger.exception("Failed to clear calendar fields for todo %s: %s", td.id, e)
 
     for t in creator_qs:
         try:
-            _process_todo_for_role(t, 'creator')
-        except (DatabaseError, IntegrityError, RequestException, HttpError, RefreshError, GoogleCalendarAuthRequired,
-                CeleryError, ValueError, TypeError, RuntimeError) as e:
-            logger.exception("Unexpected error while transferring reminders for todo %s user %s: %s",
-                             getattr(t, 'id', '<unknown>'), user_id, e)
+            _process(t, "creator")
+        except Exception as exc:
+            logger.exception("Error processing creator todo %s: %s", t.id, exc)
 
     for t in assignee_qs:
         try:
-            _process_todo_for_role(t, 'assignee')
-        except (DatabaseError, IntegrityError, RequestException, HttpError, RefreshError, GoogleCalendarAuthRequired,
-                CeleryError, ValueError, TypeError, RuntimeError) as e:
-            logger.exception("Unexpected error while transferring reminders for todo %s user %s: %s",
-                             getattr(t, 'id', '<unknown>'), user_id, e)
+            _process(t, "assignee")
+        except Exception as exc:
+            logger.exception("Error processing assignee todo %s: %s", t.id, exc)
 
     logger.info("transfer_unsent_reminders_task finished for user_id=%s", user_id)
