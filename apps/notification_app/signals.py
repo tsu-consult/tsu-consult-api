@@ -1,10 +1,9 @@
-﻿from django.db.models.signals import post_save, post_delete
-from django.dispatch import receiver
-from django.conf import settings
-from django.utils import timezone
+﻿import logging
 
-import logging
-from celery.exceptions import CeleryError
+from django.conf import settings
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+from django.utils import timezone
 
 from apps.auth_app.models import TeacherApproval
 from apps.notification_app.models import Notification
@@ -22,7 +21,11 @@ def trigger_notification_send(sender, instance, created, **kwargs):
     if created and instance.status == Notification.Status.PENDING:
         if instance.scheduled_for and instance.scheduled_for > timezone.now():
             return
-        send_notification_task.delay(instance.id)
+        try:
+            send_notification_task.delay(instance.id)
+        except Exception as e:
+            logger.warning("Failed to enqueue send_notification_task for notification %s: %s",
+                           getattr(instance, 'id', None), e)
 
 
 @receiver(post_save, sender=TeacherApproval)
@@ -50,15 +53,23 @@ def notify_teacher_on_approval_status(sender, instance: TeacherApproval, created
 
 
 @receiver(post_save, sender=GoogleToken)
-def sync_after_integration(sender, instance, created, **kwargs):
+def sync_after_integration(sender, instance, **kwargs):
     try:
         cancel_pending_fallbacks_for_user.delay(instance.user.id)
-    except (CeleryError, RuntimeError) as e:
-        logger.warning("Failed to enqueue cancel_pending_fallbacks_for_user "
-                       "for user %s: %s", getattr(instance.user, 'id', None), e)
-    sync_existing_todos.delay(instance.user.id)
+    except Exception as e:
+        logger.warning("Failed to enqueue cancel_pending_fallbacks_for_user for user %s: %s",
+                       getattr(instance.user, 'id', None), e)
+    try:
+        sync_existing_todos.delay(instance.user.id)
+    except Exception as e:
+        logger.warning("Failed to enqueue sync_existing_todos for user %s: %s",
+                       getattr(instance.user, 'id', None), e)
 
 
 @receiver(post_delete, sender=GoogleToken)
 def transfer_unsent_reminders_on_disconnect(sender, instance, **kwargs):
-    transfer_unsent_reminders_task.delay(instance.user.id)
+    try:
+        transfer_unsent_reminders_task.delay(instance.user.id)
+    except Exception as e:
+        logger.warning("Failed to enqueue transfer_unsent_reminders_task for user %s: %s",
+                       getattr(instance.user, 'id', None), e)

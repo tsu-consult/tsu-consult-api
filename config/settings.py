@@ -178,6 +178,8 @@ if 'test' in sys.argv:
             'NAME': ':memory:',
         }
     }
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True
 else:
     DATABASES = {
         'default': {
