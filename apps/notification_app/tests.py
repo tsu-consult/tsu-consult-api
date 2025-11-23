@@ -114,15 +114,16 @@ class TodosFullTest(TestCase):
 
     @staticmethod
     def _enable_token(user):
-        return GoogleToken.objects.create(user=user, credentials=json.dumps({"x": 1}))
+        return GoogleToken.objects.create(user=user, credentials=json.dumps({"dummy": 1}))
 
     @staticmethod
     def _disable_token(user):
         GoogleToken.objects.filter(user=user).delete()
 
-    @staticmethod
-    def _run_transfer_and_get_notifs(user):
-        tasks.transfer_unsent_reminders_task(user.id)
+    def _run_transfer_and_get_notifs(self, user):
+        with patch('apps.notification_app.tasks.send_notification_task.apply_async',
+                   return_value=self.fake_async_task):
+            tasks.transfer_unsent_reminders_task(user.id)
         return list(Notification.objects.filter(user=user))
 
     @staticmethod
@@ -139,13 +140,11 @@ class TodosFullTest(TestCase):
         self.assignee = make_user(email="assignee@example.com", username="assignee")
         self.other = make_user(email="other@example.com", username="other")
         self.now = timezone.now()
-        GoogleToken.objects.filter(user__in=[self.creator, self.assignee, self.other]).delete()
 
-        self.fake_async_task = self._make_fake_async()
+        self.fake_async_task = MagicMock(id="fake-celery-task-id")
 
     @patch('apps.notification_app.tasks.GoogleCalendarService')
     def test_create_event_when_no_event_id_creator(self, gcs_mock):
-        GoogleToken.objects.create(user=self.creator, credentials=json.dumps({"dummy": "x"}))
         td = make_todo(creator=self.creator, assignee=self.assignee)
 
         inst = MagicMock()
@@ -155,9 +154,8 @@ class TodosFullTest(TestCase):
         gcs_mock.return_value = inst
 
         tasks.sync_existing_todos(self.creator.id)
-
         td.refresh_from_db()
-        self.assertEqual(get_event_id(td, 'creator') or get_event_id(td), "gcal-eid-1")
+        self.assertEqual(get_event_id(td, 'creator'), "gcal-eid-1")
 
     @patch('apps.notification_app.tasks.GoogleCalendarService')
     def test_find_existing_event_and_attach(self, gcs_mock):
@@ -204,11 +202,9 @@ class TodosFullTest(TestCase):
         gcs_mock.return_value = inst
 
         tasks.sync_existing_todos(self.creator.id)
-
         td.refresh_from_db()
-        self.assertEqual(get_event_id(td, 'creator') or get_event_id(td), 'new-eid')
-        active_attr = event_active_attr(td, 'creator') or event_active_attr(td) or 'creator_calendar_event_active'
-        self.assertTrue(getattr(td, active_attr, True))
+        self.assertEqual(get_event_id(td, 'creator'), 'new-eid')
+        self.assertTrue(get_event_active(td, 'creator'))
 
     @patch('apps.notification_app.tasks.GoogleCalendarService')
     def test_refresh_error_on_create_sets_last_sync_error(self, gcs_mock):
@@ -220,7 +216,6 @@ class TodosFullTest(TestCase):
         gcs_mock.return_value = inst
 
         tasks.sync_existing_todos(self.creator.id)
-
         td.refresh_from_db()
         self.assertIsNotNone(td.last_sync_error)
         self.assertIn("bad refresh", td.last_sync_error.lower())
@@ -350,27 +345,22 @@ class TodosFullTest(TestCase):
             reminders=[{'method': 'popup', 'minutes': 15}, {'method': 'popup', 'minutes': 30}]
         )
         self._disable_token(self.creator)
-
         send_task_mock.apply_async.return_value = self.fake_async_task
 
         notifs = self._run_transfer_and_get_notifs(self.creator)
-
-        self.assertTrue(notifs)
         td.refresh_from_db()
+        self.assertTrue(notifs)
         self.assertIsNone(get_event_id(td, 'creator'))
         self.assertFalse(get_event_active(td, 'creator'))
 
     @patch('apps.notification_app.tasks.send_notification_task')
     def test_transfer_skips_if_user_has_token(self, send_task_mock):
         self._enable_token(self.creator)
-
         self._setup_todo_with_event(
             user=self.creator,
             reminders=[{'method': 'popup', 'minutes': 15}]
         )
-
         notifs = self._run_transfer_and_get_notifs(self.creator)
-
         self.assertFalse(notifs)
 
     @patch('apps.notification_app.tasks.send_notification_task')
