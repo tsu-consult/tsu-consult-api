@@ -105,12 +105,43 @@ def make_todo(creator, assignee=None, deadline=None, title="T", description="", 
 
 
 class TodosFullTest(TestCase):
+    @staticmethod
+    def _make_fake_async():
+        class _Fake:
+            id = "fake-celery-task-id"
+
+        return _Fake()
+
+    @staticmethod
+    def _enable_token(user):
+        return GoogleToken.objects.create(user=user, credentials=json.dumps({"x": 1}))
+
+    @staticmethod
+    def _disable_token(user):
+        GoogleToken.objects.filter(user=user).delete()
+
+    @staticmethod
+    def _run_transfer_and_get_notifs(user):
+        tasks.transfer_unsent_reminders_task(user.id)
+        return list(Notification.objects.filter(user=user))
+
+    @staticmethod
+    def _setup_todo_with_event(user, reminders, active=True):
+        td = make_todo(creator=user)
+        td.reminders = reminders
+        set_event_id(td, 'eid', 'creator')
+        set_event_active(td, active, 'creator')
+        td.save()
+        return td
+
     def setUp(self):
         self.creator = make_user(email="creator@example.com", username="creator")
         self.assignee = make_user(email="assignee@example.com", username="assignee")
         self.other = make_user(email="other@example.com", username="other")
         self.now = timezone.now()
         GoogleToken.objects.filter(user__in=[self.creator, self.assignee, self.other]).delete()
+
+        self.fake_async_task = self._make_fake_async()
 
     @patch('apps.notification_app.tasks.GoogleCalendarService')
     def test_create_event_when_no_event_id_creator(self, gcs_mock):
@@ -314,43 +345,33 @@ class TodosFullTest(TestCase):
     # ---------------------------
     @patch('apps.notification_app.tasks.send_notification_task')
     def test_transfer_creates_notifications_and_clears_fields(self, send_task_mock):
-        minutes_allowed = [{'method': 'popup', 'minutes': 15}, {'method': 'popup', 'minutes': 30}]
-        td = make_todo(creator=self.creator)
-        set_event_id(td, 'eid', 'creator')
-        set_event_active(td, True, 'creator')
-        td.reminders = minutes_allowed
-        td.save()
+        td = self._setup_todo_with_event(
+            user=self.creator,
+            reminders=[{'method': 'popup', 'minutes': 15}, {'method': 'popup', 'minutes': 30}]
+        )
+        self._disable_token(self.creator)
 
-        GoogleToken.objects.filter(user=self.creator).delete()
+        send_task_mock.apply_async.return_value = self.fake_async_task
 
-        mock_async = MagicMock()
-        mock_async.id = "fake-celery-task-id"
-        send_task_mock.apply_async.return_value = mock_async
+        notifs = self._run_transfer_and_get_notifs(self.creator)
 
-        tasks.transfer_unsent_reminders_task(self.creator.id)
-
-        notifs = Notification.objects.filter(user=self.creator)
-        self.assertTrue(notifs.exists())
+        self.assertTrue(notifs)
         td.refresh_from_db()
-        self.assertIsNone(get_event_id(td, 'creator') or get_event_id(td))
-        self.assertFalse(get_event_active(td, 'creator') or get_event_active(td))
+        self.assertIsNone(get_event_id(td, 'creator'))
+        self.assertFalse(get_event_active(td, 'creator'))
 
     @patch('apps.notification_app.tasks.send_notification_task')
     def test_transfer_skips_if_user_has_token(self, send_task_mock):
-        GoogleToken.objects.create(user=self.creator, credentials=json.dumps({"x": 1}))
+        self._enable_token(self.creator)
 
-        minutes_allowed = [{'method': 'popup', 'minutes': 15}]
-        td = make_todo(creator=self.creator)
-        set_event_id(td, 'eid', 'creator')
-        if event_active_attr(td, 'creator') or event_active_attr(td):
-            set_event_active(td, True, 'creator')
-        td.reminders = minutes_allowed
-        td.save()
+        self._setup_todo_with_event(
+            user=self.creator,
+            reminders=[{'method': 'popup', 'minutes': 15}]
+        )
 
-        tasks.transfer_unsent_reminders_task(self.creator.id)
+        notifs = self._run_transfer_and_get_notifs(self.creator)
 
-        notifs = Notification.objects.filter(user=self.creator)
-        self.assertFalse(notifs.exists())
+        self.assertFalse(notifs)
 
     @patch('apps.notification_app.tasks.send_notification_task')
     def test_transfer_skips_past_due(self, send_task_mock):
@@ -368,80 +389,55 @@ class TodosFullTest(TestCase):
 
     @patch('apps.notification_app.tasks.send_notification_task')
     def test_transfer_handles_db_errors_on_notification_creation(self, send_task_mock):
-        td = make_todo(creator=self.creator)
-        set_event_id(td, 'eid', 'creator')
-        td.reminders = [{'method': 'popup', 'minutes': 15}]
-        td.save()
+        self._setup_todo_with_event(
+            user=self.creator,
+            reminders=[{'method': 'popup', 'minutes': 15}]
+        )
+        self._disable_token(self.creator)
 
-        GoogleToken.objects.filter(user=self.creator).delete()
-
-        mock_async = MagicMock()
-        mock_async.id = "fake-celery-task-id"
-        send_task_mock.apply_async.return_value = mock_async
+        send_task_mock.apply_async.return_value = self.fake_async_task
 
         with patch('apps.notification_app.models.Notification.objects.get_or_create',
                    side_effect=IntegrityError("db fail")):
-            tasks.transfer_unsent_reminders_task(self.creator.id)
+            self._run_transfer_and_get_notifs(self.creator)
 
         self.assertFalse(Notification.objects.filter(user=self.creator).exists())
 
     @patch('apps.notification_app.tasks.send_notification_task')
     def test_transfer_reminders_skipped_after_reconnect(self, send_task_mock):
-        td = make_todo(creator=self.creator)
-        td.reminders = [{'method': 'popup', 'minutes': 15}]
-        set_event_id(td, 'eid', 'creator')
-        set_event_active(td, True, 'creator')
-        td.save()
+        self._setup_todo_with_event(
+            user=self.creator,
+            reminders=[{'method': 'popup', 'minutes': 15}]
+        )
+        self._disable_token(self.creator)
+        send_task_mock.apply_async.return_value = self.fake_async_task
 
-        GoogleToken.objects.filter(user=self.creator).delete()
+        notifs_before = self._run_transfer_and_get_notifs(self.creator)
+        self.assertTrue(notifs_before)
 
-        class FakeAsync:
-            id = "fake-celery-task-id"
+        self._enable_token(self.creator)
+        notifs_after = self._run_transfer_and_get_notifs(self.creator)
 
-        send_task_mock.apply_async.return_value = FakeAsync()
-
-        tasks.transfer_unsent_reminders_task(self.creator.id)
-
-        notifs = Notification.objects.filter(user=self.creator)
-        self.assertTrue(notifs.exists())
-        td.refresh_from_db()
-        self.assertIsNone(get_event_id(td, 'creator'))
-
-        GoogleToken.objects.create(user=self.creator, credentials=json.dumps({"x": 1}))
-        tasks.transfer_unsent_reminders_task(self.creator.id)
-
-        notifs_after = Notification.objects.filter(user=self.creator)
-        self.assertEqual(notifs_after.count(), notifs.count())
+        self.assertEqual(len(notifs_after), len(notifs_before))
 
     @patch('apps.notification_app.tasks.send_notification_task')
     def test_double_disconnect_no_reminder_duplication(self, send_task_mock):
-        td = make_todo(creator=self.creator)
-        td.reminders = [{'method': 'popup', 'minutes': 15}]
-        set_event_id(td, 'eid', 'creator')
-        set_event_active(td, True, 'creator')
-        td.save()
+        td = self._setup_todo_with_event(
+            user=self.creator,
+            reminders=[{'method': 'popup', 'minutes': 15}]
+        )
+        send_task_mock.apply_async.return_value = self.fake_async_task
 
-        GoogleToken.objects.filter(user=self.creator).delete()
-
-        class FakeAsync:
-            id = "fake-celery-task-id"
-
-        send_task_mock.apply_async.return_value = FakeAsync()
-
-        tasks.transfer_unsent_reminders_task(self.creator.id)
-        notifs_first = Notification.objects.filter(user=self.creator)
-        self.assertEqual(notifs_first.count(), 1)
+        self._disable_token(self.creator)
+        notifs_first = self._run_transfer_and_get_notifs(self.creator)
+        self.assertEqual(len(notifs_first), 1)
         td.refresh_from_db()
         self.assertIsNone(get_event_id(td, 'creator'))
 
-        GoogleToken.objects.create(user=self.creator, credentials=json.dumps({"x": 1}))
-        tasks.transfer_unsent_reminders_task(self.creator.id)
+        self._enable_token(self.creator)
+        notifs_mid = self._run_transfer_and_get_notifs(self.creator)
+        self.assertEqual(len(notifs_mid), 1)
 
-        notifs_mid = Notification.objects.filter(user=self.creator)
-        self.assertEqual(notifs_mid.count(), 1)
-
-        GoogleToken.objects.filter(user=self.creator).delete()
-        tasks.transfer_unsent_reminders_task(self.creator.id)
-        notifs_final = Notification.objects.filter(user=self.creator)
-
-        self.assertEqual(notifs_final.count(), 1)
+        self._disable_token(self.creator)
+        notifs_final = self._run_transfer_and_get_notifs(self.creator)
+        self.assertEqual(len(notifs_final), 1)
