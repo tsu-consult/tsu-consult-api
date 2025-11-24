@@ -99,3 +99,38 @@ class ToDoListView(ErrorResponseMixin, APIView):
         page = paginator.paginate_queryset(todos, request)
         serializer = ToDoListResponseSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class ToDoDetailView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsActive, IsTeacherOrDean]
+
+    @swagger_auto_schema(
+        tags=["To Do"],
+        operation_summary="Детали задачи",
+        operation_description="Возвращает задачу по её id. Доступны только создатель или назначенный преподаватель.",
+        responses={
+            200: openapi.Response(description="Детали задачи", schema=ToDoResponseSerializer),
+            400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Не найдено", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def get(self, request, todo_id):
+        try:
+            tid = int(todo_id)
+        except (ValueError, TypeError):
+            return self.format_error(request, 400, "Bad Request", f"Invalid todo id: {todo_id}")
+
+        try:
+            todo = ToDo.objects.get(id=tid)
+        except ToDo.DoesNotExist:
+            return self.format_error(request, 404, "Not Found",
+                                     f"ToDo with id={tid} not found.")
+
+        if not todo.is_accessible_by(request.user):
+            return self.format_error(request, 403, "Forbidden",
+                                     "You do not have permission to perform this action.")
+
+        return Response(ToDoResponseSerializer(todo).data, status=200)

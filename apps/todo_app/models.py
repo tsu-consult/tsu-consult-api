@@ -47,14 +47,11 @@ class ToDo(models.Model):
 
     def is_accessible_by(self, user):
         return user and user.is_authenticated and (
-            self.creator_id == user.id
-            or (self.assignee_id and self.assignee_id == user.id)
-            or getattr(user, 'role', None) == 'admin'
+            self.creator_id == user.id or (self.assignee_id and self.assignee_id == user.id)
         )
 
     def is_editable_by(self, user):
-        return bool(user and user.is_authenticated and
-                    (self.creator_id == user.id or getattr(user, 'role', None) == 'admin'))
+        return bool(user and user.is_authenticated and self.creator_id == user.id)
 
     def create_calendar_event(self, calendar_service, reminders=None, for_creator=False):
         if not self.deadline:

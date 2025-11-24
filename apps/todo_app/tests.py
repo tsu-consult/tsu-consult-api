@@ -798,3 +798,98 @@ class ToDoListViewTestCase(APITestCase):
         response = self.client.get(reverse('todo-list'))
 
         self.assertEqual(response.status_code, 401)
+
+    def test_teacher_can_only_see_own_and_assigned_todos(self):
+        self.client.force_authenticate(user=self.teacher)
+
+        response = self.client.get(reverse('todo-list'))
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertEqual(len(todos), 3)
+        self.assertTrue(any(todo['title'] == "Teacher's Task" for todo in todos))
+        self.assertTrue(any(todo['title'] == "Assigned Task" for todo in todos))
+        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+
+        another_teacher = User.objects.create_user(email="teacher2@example.com", username="teacher2", role="teacher")
+        ToDo.objects.create(title="Other Teacher's Task", creator=another_teacher,
+                            assignee=another_teacher, status="in progress")
+
+        response = self.client.get(reverse('todo-list'))
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertEqual(len(todos), 3)
+        self.assertFalse(any(todo['title'] == "Other Teacher's Task" for todo in todos))
+
+    def test_task_assignment_changes_access(self):
+        self.client.force_authenticate(user=self.teacher)
+
+        response = self.client.get(reverse('todo-list'))
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+
+        new_teacher = User.objects.create_user(email="new_teacher@example.com", username="new_teacher", role="teacher")
+        self.todo3.assignee = new_teacher
+        self.todo3.save()
+
+        response = self.client.get(reverse('todo-list'))
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertFalse(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+        self.assertTrue(any(todo['title'] == "Assigned Task" for todo in todos))
+        self.assertTrue(any(todo['title'] == "Teacher's Task" for todo in todos))
+
+        self.client.force_authenticate(user=new_teacher)
+        response = self.client.get(reverse('todo-list'))
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+
+
+class ToDoDetailViewTestCase(APITestCase):
+    def setUp(self):
+        self.creator = User.objects.create_user(email="creator@example.com", username="creator",
+                                                password="password", role="dean")
+        self.assignee = User.objects.create_user(email="assignee@example.com", username="assignee",
+                                                 password="password", role="teacher")
+        self.other_user = User.objects.create_user(email="other@example.com", username="other",
+                                                   password="password", role="student")
+
+        self.todo = ToDo.objects.create(
+            title="Test Task",
+            description="Test Description",
+            deadline=timezone.now() + timedelta(days=1),
+            creator=self.creator,
+            assignee=self.assignee,
+        )
+
+    def test_creator_can_access_todo(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.get(f"/todo/{self.todo.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['title'], "Test Task")
+
+    def test_assignee_can_access_todo(self):
+        self.client.force_authenticate(user=self.assignee)
+        response = self.client.get(f"/todo/{self.todo.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['title'], "Test Task")
+
+    def test_other_user_cannot_access_todo(self):
+        self.client.force_authenticate(user=self.other_user)
+        response = self.client.get(f"/todo/{self.todo.id}/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_todo_not_found(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.get("/todo/999999/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_invalid_todo_id(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.get("/todo/invalid_id/")
+        self.assertEqual(response.status_code, 400)
+
+        self.client.force_authenticate(user=None)
+        response = self.client.get(f"/todo/{self.todo.id}/")
+        self.assertEqual(response.status_code, 401)
