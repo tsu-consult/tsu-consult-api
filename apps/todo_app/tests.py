@@ -415,11 +415,17 @@ class ToDoRemindersTests(BaseTest):
         self.assertEqual(resp.status_code, 400)
         self.assertIn('reminders', str(resp.data))
 
-    def test_schedule_fallback_creates_notifications_with_correct_times(self):
+    @patch('apps.notification_app.tasks.send_notification_task.apply_async')
+    def test_schedule_fallback_creates_notifications_with_correct_times(self, mock_apply_async):
         future = timezone.now() + timedelta(hours=2)
         todo = ToDo.objects.create(title='FallbackRem', creator=self.teacher, assignee=self.teacher, deadline=future)
 
         reminders = [{'method': 'popup', 'minutes': 15}, {'method': 'popup', 'minutes': 60}]
+
+        mock_celery_task = Mock()
+        mock_celery_task.id = 'mock-task-id'
+        mock_apply_async.return_value = mock_celery_task
+
         FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=self.teacher)
 
         notifs = Notification.objects.filter(user=self.teacher, title__icontains='Напоминание о задаче')
@@ -454,12 +460,17 @@ class ToDoNotificationTests(BaseTest):
         notif_exists = Notification.objects.filter(user=self.teacher, title__icontains='Новая задача').exists()
         self.assertTrue(notif_exists)
 
-    def test_teacher_gets_notification_when_reminder_triggers_immediate(self):
+    @patch('apps.notification_app.tasks.send_notification_task.apply_async')
+    def test_teacher_gets_notification_when_reminder_triggers_immediate(self, mock_apply_async):
         future = timezone.now() + timedelta(minutes=5)
         todo = ToDo.objects.create(title='NotifyImmediate', creator=self.teacher,
                                    assignee=self.teacher, deadline=future)
 
         reminders = [{'method': 'popup', 'minutes': 15}]
+
+        mock_celery_task = Mock()
+        mock_celery_task.id = 'mock-task-id'
+        mock_apply_async.return_value = mock_celery_task
 
         FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=self.teacher)
 
@@ -568,4 +579,3 @@ class ToDoErrorHandlingTests(BaseTest):
 
         self.assertIn(resp.status_code, (500, 201))
         self.assertTrue(mock_fallback.called)
-

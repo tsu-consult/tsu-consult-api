@@ -151,8 +151,10 @@ class TodosFullTest(TestCase):
         self.fake_async_task = MagicMock(id="fake-celery-task-id")
         self.fake_async_task.revoke.return_value = None
 
-        self.delay_patcher = patch('apps.notification_app.tasks.send_notification_task.delay', return_value=self.fake_async_task)
-        self.apply_async_patcher = patch('apps.notification_app.tasks.send_notification_task.apply_async', return_value=self.fake_async_task)
+        self.delay_patcher = patch('apps.notification_app.tasks.send_notification_task.delay',
+                                   return_value=self.fake_async_task)
+        self.apply_async_patcher = patch('apps.notification_app.tasks.send_notification_task.apply_async',
+                                         return_value=self.fake_async_task)
         self.async_result_patcher = patch('celery.result.AsyncResult', return_value=self.fake_async_task)
 
         self.delay_patcher.start()
