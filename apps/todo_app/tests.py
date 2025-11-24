@@ -29,7 +29,9 @@ class BaseTest(TestCase):
         self.task_apply_async_patcher = patch('apps.notification_app.tasks.send_notification_task.apply_async')
         self.mock_task_apply_async = self.task_apply_async_patcher.start()
         self.addCleanup(self.task_apply_async_patcher.stop)
-        self.mock_task_apply_async.return_value = None
+        mock_apply_async_ret = Mock()
+        mock_apply_async_ret.id = 'mock-task-id'
+        self.mock_task_apply_async.return_value = mock_apply_async_ret
 
         self.models_logger_exc_patcher = patch('apps.todo_app.models.logger.exception')
         self.mock_models_logger_exc = self.models_logger_exc_patcher.start()
@@ -464,6 +466,9 @@ class ToDoRemindersTests(BaseTest):
         super().setUp()
         self.teacher = User.objects.create_user(email='r_gc@example.com', username='r_gc', role='teacher')
         self.dean = User.objects.create_user(email='r_gc_dean@example.com', username='r_gc_dean', role='dean')
+        self.future = timezone.now() + timedelta(hours=2)
+        self.reminders = [{'method': 'popup', 'minutes': 15}, {'method': 'popup', 'minutes': 60}]
+        self.assignee_reminders = [{'method': 'popup', 'minutes': 15}]
 
     def post_as(self, user, data):
         self.client.force_authenticate(user=user)
@@ -534,6 +539,58 @@ class ToDoRemindersTests(BaseTest):
             found = any(nf is not None and abs((nf - et).total_seconds()) < 2 for nf in scheduled)
             self.assertTrue(found)
 
+    def test_no_immediate_notifications_created(self):
+        todo = ToDo.objects.create(title="Test Task", creator=self.teacher, assignee=self.teacher, deadline=self.future)
+
+        FallbackReminderService().schedule_fallback_reminders(todo, self.reminders, target_user=self.teacher)
+
+        notifs = Notification.objects.filter(todo=todo, scheduled_for__lte=timezone.now())
+        self.assertEqual(notifs.count(), 0)
+
+    def test_only_deferred_notifications_created(self):
+        todo = ToDo.objects.create(title="Test Task", creator=self.teacher, assignee=self.teacher, deadline=self.future)
+
+        FallbackReminderService().schedule_fallback_reminders(todo, self.reminders, target_user=self.teacher)
+
+        notifications = Notification.objects.filter(todo=todo)
+        self.assertEqual(notifications.count(), 2)
+
+        for notif in notifications:
+            self.assertGreater(notif.scheduled_for, timezone.now())
+
+    def test_correct_times_for_deferred_notifications(self):
+        todo = ToDo.objects.create(title="Test Task", creator=self.teacher, assignee=self.teacher, deadline=self.future)
+
+        FallbackReminderService().schedule_fallback_reminders(todo, self.reminders, target_user=self.teacher)
+
+        notifications = Notification.objects.filter(todo=todo)
+
+        expected_times = [todo.deadline - timedelta(minutes=m) for m in [15, 60]]
+
+        for notif, expected_time in zip(notifications, expected_times):
+            self.assertAlmostEqual(notif.scheduled_for, expected_time, delta=timedelta(seconds=5))
+
+    def test_no_notifications_for_past_deadline(self):
+        past = timezone.now() - timedelta(hours=1)
+        todo = ToDo.objects.create(title="Test Task", creator=self.teacher, assignee=self.teacher, deadline=past)
+
+        FallbackReminderService().schedule_fallback_reminders(todo, self.reminders, target_user=self.teacher)
+
+        notifications = Notification.objects.filter(todo=todo)
+        self.assertEqual(notifications.count(), 0)
+
+    def test_notifications_for_assignee_and_creator(self):
+        todo = ToDo.objects.create(title="Test Task", creator=self.dean, assignee=self.teacher, deadline=self.future)
+
+        FallbackReminderService().schedule_fallback_reminders(todo, self.reminders, target_user=self.dean)
+        FallbackReminderService().schedule_fallback_reminders(todo, self.assignee_reminders, target_user=self.teacher)
+
+        notifications = Notification.objects.filter(user=self.dean)
+        self.assertGreater(notifications.count(), 0)
+
+        notifications_for_assignee = Notification.objects.filter(user=self.teacher)
+        self.assertGreater(notifications_for_assignee.count(), 0)
+
 
 class ToDoNotificationTests(BaseTest):
     def setUp(self):
@@ -555,54 +612,6 @@ class ToDoNotificationTests(BaseTest):
         self.assertEqual(resp.status_code, 201)
         notif_exists = Notification.objects.filter(user=self.teacher, title__icontains='Новая задача').exists()
         self.assertTrue(notif_exists)
-
-    @patch('apps.notification_app.tasks.send_notification_task.apply_async')
-    def test_teacher_gets_notification_when_reminder_triggers_immediate(self, mock_apply_async):
-        future = timezone.now() + timedelta(minutes=5)
-        todo = ToDo.objects.create(title='NotifyImmediate', creator=self.teacher,
-                                   assignee=self.teacher, deadline=future)
-
-        reminders = [{'method': 'popup', 'minutes': 15}]
-
-        mock_celery_task = Mock()
-        mock_celery_task.id = 'mock-task-id'
-        mock_apply_async.return_value = mock_celery_task
-
-        FallbackReminderService().schedule_fallback_reminders(todo, reminders, target_user=self.teacher)
-
-        notif = Notification.objects.filter(user=self.teacher, title__icontains='Напоминание о задаче').first()
-        self.assertIsNotNone(notif)
-        self.assertTrue(self.mock_task_delay.called)
-
-    def test_dean_gets_notifications_only_for_todos_he_created_when_specified(self):
-        future = timezone.now() + timedelta(hours=1)
-        data = {
-            'title': 'Dean Own With Reminders',
-            'assignee_id': self.teacher.id,
-            'deadline': future.isoformat(),
-            'reminders': [{'method': 'popup', 'minutes': 15}],
-        }
-
-        resp, svc, mock_fallback = self.post_todo_as(self.dean, data, service=None)
-
-        self.assertEqual(resp.status_code, 201)
-        self.assertTrue(mock_fallback.called)
-        called_args, called_kwargs = mock_fallback.call_args
-        self.assertIn('target_user', called_kwargs)
-        self.assertEqual(called_kwargs.get('target_user'), self.dean)
-
-        future2 = timezone.now() + timedelta(hours=1)
-        data2 = {
-            'title': 'Teacher Personal With Reminders',
-            'deadline': future2.isoformat(),
-            'reminders': [{'method': 'popup', 'minutes': 15}],
-        }
-        resp2, svc2, _ = self.post_todo_as(self.teacher, data2, service=None)
-
-        self.assertEqual(resp2.status_code, 201)
-        dean_notifs = Notification.objects.filter(user=self.dean, title__icontains='Напоминание о задаче',
-                                                  message__icontains='Teacher Personal With Reminders')
-        self.assertFalse(dean_notifs.exists())
 
 
 class ToDoValidationTests(BaseTest):

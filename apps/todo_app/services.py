@@ -1,6 +1,5 @@
 ﻿import json
 import logging
-import math
 from datetime import timedelta
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -81,38 +80,8 @@ class FallbackReminderService:
 
         for minutes_int in unique_reminders:
             notify_at = todo.deadline - timedelta(minutes=minutes_int)
+
             if notify_at <= now:
-                remaining_seconds = (todo.deadline - now).total_seconds()
-                if remaining_seconds <= 0:
-                    logger.debug(
-                        "Skipping overdue reminder for todo %s: deadline passed (now=%s, deadline=%s)",
-                        getattr(todo, "id", None), now, getattr(todo, "deadline", None),
-                    )
-                    continue
-
-                remaining_minutes = int(math.ceil(remaining_seconds / 60))
-                interval_str = self.humanize_minutes(remaining_minutes)
-                message = f'Через {interval_str} наступает дедлайн задачи "{todo.title}".'
-
-                n = Notification.objects.create(
-                    user=target_user,
-                    todo=todo,
-                    title="Напоминание о задаче",
-                    message=message,
-                    type=Notification.Type.TELEGRAM,
-                    status=Notification.Status.PENDING,
-                    scheduled_for=None,
-                )
-                try:
-                    from apps.notification_app.tasks import send_notification_task
-                    celery_task = send_notification_task.apply_async(args=[n.id])
-                    n.celery_task_id = celery_task.id
-                    n.save(update_fields=["celery_task_id"])
-                    logger.info("Scheduled immediate notification %s for todo %s", n.id, todo.id)
-                except (CeleryError, RuntimeError) as e:
-                    logger.exception(
-                        "Failed scheduling immediate notification %s for todo %s: %s", n.id, todo.id, e
-                    )
                 continue
 
             interval_str = self.humanize_minutes(minutes_int)
