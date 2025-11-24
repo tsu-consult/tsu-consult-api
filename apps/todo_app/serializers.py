@@ -124,3 +124,21 @@ class ToDoResponseSerializer(serializers.ModelSerializer):
         model = ToDo
         fields = ["id", "title", "description", "deadline", "status", "creator", "assignee", "reminders",
                   "assignee_reminders", "created_at", "updated_at"]
+
+
+class ToDoListResponseSerializer(serializers.ModelSerializer):
+    creator = UserSerializer(read_only=True)
+    assignee = UserSerializer(read_only=True, required=False)
+
+    class Meta:
+        model = ToDo
+        fields = ["id", "title", "status", "deadline", "creator", "assignee", "created_at", "updated_at"]
+
+
+class PaginatedToDosSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    total_pages = serializers.IntegerField()
+    current_page = serializers.IntegerField()
+    next = serializers.CharField(allow_null=True)
+    previous = serializers.CharField(allow_null=True)
+    results = ToDoListResponseSerializer(many=True)

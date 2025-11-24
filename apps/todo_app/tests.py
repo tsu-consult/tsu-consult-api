@@ -4,9 +4,10 @@ from contextlib import contextmanager
 from typing import Optional
 
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 from googleapiclient.errors import HttpError
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APITestCase
 
 from apps.auth_app.models import User
 from apps.notification_app.models import Notification
@@ -684,3 +685,116 @@ class ToDoErrorHandlingTests(BaseTest):
 
         self.assertIn(resp.status_code, (500, 201))
         self.assertTrue(mock_fallback.called)
+
+
+class ToDoListViewTestCase(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(email="teacher@example.com", username="teacher", role="teacher")
+        self.dean = User.objects.create_user(email="dean@example.com", username="dean", role="dean")
+        self.student = User.objects.create_user(email="student@example.com", username="student", role="student")
+
+        self.todo1 = ToDo.objects.create(title="Teacher's Task", creator=self.teacher, assignee=self.teacher,
+                                         status="in progress")
+        self.todo2 = ToDo.objects.create(title="Assigned Task", creator=self.dean, assignee=self.teacher, status="done")
+        self.todo3 = ToDo.objects.create(title="Another Teacher's Task", creator=self.dean, assignee=self.teacher,
+                                         status="in progress")
+
+    def test_admin_cannot_access_todos(self):
+        admin = User.objects.create_user(email="admin_test@example.com", username="admin_test", role="admin")
+        self.client.force_authenticate(user=admin)
+
+        response = self.client.get(reverse('todo-list'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_teacher_can_access_own_and_assigned_todos(self):
+        self.client.force_authenticate(user=self.teacher)
+
+        response = self.client.get(reverse('todo-list'))
+
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertEqual(len(todos), 3)
+        self.assertTrue(any(todo['title'] == "Teacher's Task" for todo in todos))
+        self.assertTrue(any(todo['title'] == "Assigned Task" for todo in todos))
+        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+
+    def test_dean_can_access_all_todos(self):
+        self.client.force_authenticate(user=self.dean)
+
+        response = self.client.get(reverse('todo-list'))
+
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertEqual(len(todos), 2)
+        self.assertTrue(any(todo['title'] == "Assigned Task" for todo in todos))
+        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+
+    def test_student_cannot_access_todos(self):
+        self.client.force_authenticate(user=self.student)
+
+        response = self.client.get(reverse('todo-list'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_filter_by_status_in_progress(self):
+        self.client.force_authenticate(user=self.teacher)
+
+        response = self.client.get(reverse('todo-list'), {'status': 'in progress'})
+
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertEqual(len(todos), 2)
+        self.assertTrue(any(todo['title'] == "Teacher's Task" for todo in todos))
+        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+
+    def test_filter_by_status_done(self):
+        self.client.force_authenticate(user=self.teacher)
+
+        response = self.client.get(reverse('todo-list'), {'status': 'done'})
+
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertEqual(len(todos), 1)
+        self.assertTrue(any(todo['title'] == "Assigned Task" for todo in todos))
+
+    def test_pagination(self):
+        self.client.force_authenticate(user=self.teacher)
+
+        for i in range(15):
+            ToDo.objects.create(title=f"Task {i + 1}", creator=self.teacher, assignee=self.teacher)
+
+        response = self.client.get(reverse('todo-list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 10)
+        self.assertIsNotNone(response.data['next'])
+        self.assertIsNone(response.data['previous'])
+
+    def test_second_page_pagination(self):
+        self.client.force_authenticate(user=self.teacher)
+
+        for i in range(15):
+            ToDo.objects.create(title=f"Task {i + 1}", creator=self.teacher, assignee=self.teacher)
+
+        response = self.client.get(reverse('todo-list'), {'page': 2})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 8)
+        self.assertIsNone(response.data['next'])
+        self.assertIsNotNone(response.data['previous'])
+
+    def test_empty_todos_list(self):
+        self.client.force_authenticate(user=self.teacher)
+
+        ToDo.objects.all().delete()
+
+        response = self.client.get(reverse('todo-list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 0)
+
+    def test_unauthorized_access(self):
+        response = self.client.get(reverse('todo-list'))
+
+        self.assertEqual(response.status_code, 401)
