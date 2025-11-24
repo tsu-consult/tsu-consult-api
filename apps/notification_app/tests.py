@@ -114,16 +114,25 @@ class TodosFullTest(TestCase):
 
     @staticmethod
     def _enable_token(user):
-        return GoogleToken.objects.create(user=user, credentials=json.dumps({"dummy": 1}))
+        return GoogleToken.objects.create(
+            user=user,
+            credentials=json.dumps({
+                "refresh_token": "dummy-refresh-token",
+                "client_id": "dummy-client-id",
+                "client_secret": "dummy-client-secret",
+                "token": "dummy-token",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "scopes": ["https://www.googleapis.com/auth/calendar"]
+            })
+        )
 
     @staticmethod
     def _disable_token(user):
         GoogleToken.objects.filter(user=user).delete()
 
-    def _run_transfer_and_get_notifs(self, user):
-        with patch('apps.notification_app.tasks.send_notification_task.apply_async',
-                   return_value=self.fake_async_task):
-            tasks.transfer_unsent_reminders_task(user.id)
+    @staticmethod
+    def _run_transfer_and_get_notifs(user):
+        tasks.transfer_unsent_reminders_task(user.id)
         return list(Notification.objects.filter(user=user))
 
     @staticmethod
@@ -138,10 +147,31 @@ class TodosFullTest(TestCase):
     def setUp(self):
         self.creator = make_user(email="creator@example.com", username="creator")
         self.assignee = make_user(email="assignee@example.com", username="assignee")
-        self.other = make_user(email="other@example.com", username="other")
-        self.now = timezone.now()
 
         self.fake_async_task = MagicMock(id="fake-celery-task-id")
+        self.fake_async_task.revoke.return_value = None
+
+        self.delay_patcher = patch('apps.notification_app.tasks.send_notification_task.delay', return_value=self.fake_async_task)
+        self.apply_async_patcher = patch('apps.notification_app.tasks.send_notification_task.apply_async', return_value=self.fake_async_task)
+        self.async_result_patcher = patch('celery.result.AsyncResult', return_value=self.fake_async_task)
+
+        self.delay_patcher.start()
+        self.apply_async_patcher.start()
+        self.async_result_patcher.start()
+
+        self.addCleanup(self.delay_patcher.stop)
+        self.addCleanup(self.apply_async_patcher.stop)
+        self.addCleanup(self.async_result_patcher.stop)
+
+        patcher_gcs = patch('apps.notification_app.tasks.GoogleCalendarService', autospec=True)
+        self.mock_gcs_class = patcher_gcs.start()
+        self.addCleanup(patcher_gcs.stop)
+        self.mock_gcs_instance = MagicMock()
+        self.mock_gcs_instance.service = True
+        self.mock_gcs_instance.find_event_for_todo.return_value = None
+        self.mock_gcs_instance.create_event.return_value = "mock-eid"
+        self.mock_gcs_instance.get_event.return_value = None
+        self.mock_gcs_class.return_value = self.mock_gcs_instance
 
     @patch('apps.notification_app.tasks.GoogleCalendarService')
     def test_create_event_when_no_event_id_creator(self, gcs_mock):
@@ -240,16 +270,28 @@ class TodosFullTest(TestCase):
 
     @patch('apps.notification_app.tasks.GoogleCalendarService')
     def test_http_error_saves_last_sync_error_and_continues(self, gcs_mock):
+        class FakeResponse:
+            def __init__(self, status=400, reason="Bad Request"):
+                self.status = status
+                self.reason = reason
+
+            @staticmethod
+            def getheaders():
+                return {}
+
+            @staticmethod
+            def info():
+                return {}
+
         td = make_todo(creator=self.creator)
+
         inst = MagicMock()
         inst.service = True
         inst.find_event_for_todo.return_value = None
 
-        resp_mock = MagicMock()
-        resp_mock.status = 400
-        content_mock = b'{"error": "bad request"}'
+        resp = FakeResponse(status=400, reason="Bad Request")
+        http_exc = HttpError(resp, b'{"error": "bad request"}')
 
-        http_exc = HttpError(resp_mock, content_mock)
         inst.create_event.side_effect = http_exc
         gcs_mock.return_value = inst
 
@@ -393,30 +435,47 @@ class TodosFullTest(TestCase):
 
         self.assertFalse(Notification.objects.filter(user=self.creator).exists())
 
+    @patch('celery.current_app.control.revoke')
+    @patch('apps.notification_app.tasks.GoogleCalendarService')
     @patch('apps.notification_app.tasks.send_notification_task')
-    def test_transfer_reminders_skipped_after_reconnect(self, send_task_mock):
+    def test_transfer_reminders_skipped_after_reconnect(self, send_task_mock, gcs_mock, mock_revoke):
         self._setup_todo_with_event(
             user=self.creator,
             reminders=[{'method': 'popup', 'minutes': 15}]
         )
         self._disable_token(self.creator)
+
         send_task_mock.apply_async.return_value = self.fake_async_task
+
+        inst = MagicMock()
+        inst.service = True
+        inst.find_event_for_todo.return_value = None
+        inst.create_event.return_value = "mock-eid"
+        gcs_mock.return_value = inst
 
         notifs_before = self._run_transfer_and_get_notifs(self.creator)
         self.assertTrue(notifs_before)
 
         self._enable_token(self.creator)
         notifs_after = self._run_transfer_and_get_notifs(self.creator)
-
         self.assertEqual(len(notifs_after), len(notifs_before))
 
+    @patch('celery.current_app.control.revoke')
+    @patch('apps.notification_app.tasks.GoogleCalendarService')
     @patch('apps.notification_app.tasks.send_notification_task')
-    def test_double_disconnect_no_reminder_duplication(self, send_task_mock):
+    def test_double_disconnect_no_reminder_duplication(self, send_task_mock, gcs_mock, mock_revoke):
+        send_task_mock.apply_async.return_value = self.fake_async_task
+
+        inst = MagicMock()
+        inst.service = True
+        inst.find_event_for_todo.return_value = None
+        inst.create_event.return_value = "mock-eid"
+        gcs_mock.return_value = inst
+
         td = self._setup_todo_with_event(
             user=self.creator,
             reminders=[{'method': 'popup', 'minutes': 15}]
         )
-        send_task_mock.apply_async.return_value = self.fake_async_task
 
         self._disable_token(self.creator)
         notifs_first = self._run_transfer_and_get_notifs(self.creator)

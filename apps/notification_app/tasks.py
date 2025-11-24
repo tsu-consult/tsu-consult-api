@@ -10,7 +10,6 @@ from django.utils import timezone
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 from requests.exceptions import RequestException
-
 from apps.notification_app.models import Notification
 from apps.notification_app.services import send_telegram_notification
 from apps.todo_app.models import ToDo
@@ -327,7 +326,7 @@ def sync_existing_todos(self, user_id: int):
                                    td.id, role, e)
                     retries = getattr(self.request, "retries", 0)
                     countdown = min(2 ** retries * 60, 3600)
-                    raise self.retry(exc=e, countdown=countdown)
+                    return self.retry(exc=e, countdown=countdown)
                 except HttpError as e:
                     _save_last_sync_error(td, e)
                     logger.exception("Google HttpError creating event for todo %s (role=%s): %s",
@@ -346,7 +345,7 @@ def sync_existing_todos(self, user_id: int):
             logger.warning("Network error while syncing todo %s (role=%s): %s", td.id, role, e)
             retries = getattr(self.request, "retries", 0)
             countdown = min(2 ** retries * 60, 3600)
-            raise self.retry(exc=e, countdown=countdown)
+            return self.retry(exc=e, countdown=countdown)
         except HttpError as e:
             _save_last_sync_error(td, e)
             logger.exception("Google HttpError while syncing todo %s (role=%s): %s", td.id, role, e)
