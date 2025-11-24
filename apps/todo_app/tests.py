@@ -331,7 +331,15 @@ class ToDoPermissionTests(TestCase):
 
     def list_as(self, user):
         self.client.force_authenticate(user=user)
-        return self.client.get('/todo/')
+        resp = self.client.get(reverse('todo-list'))
+
+        try:
+            data = getattr(resp, 'data', None)
+            if isinstance(data, dict) and 'results' in data:
+                resp.data = data['results']
+        except (AttributeError, TypeError):
+            pass
+        return resp
 
     def retrieve_as(self, user, todo_id):
         self.client.force_authenticate(user=user)
