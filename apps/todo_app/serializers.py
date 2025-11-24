@@ -4,7 +4,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.auth_app.models import User
 from apps.todo_app.config import MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH, \
-    MIN_DEADLINE_DELTA
+    MIN_DEADLINE_DELTA, TEACHER_DEFAULT_REMINDERS
 from apps.todo_app.models import ToDo
 from apps.todo_app.utils import get_user_reminders, normalize_reminders_permissive
 
@@ -105,7 +105,7 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
             validated_data['assignee'] = user
 
         reminders = get_user_reminders(user, self.initial_data, validated_data.get('reminders'))
-        assignee_reminders = get_user_reminders(validated_data.get('assignee'), self.initial_data)
+        assignee_reminders = TEACHER_DEFAULT_REMINDERS if getattr(user, 'role', None) == 'dean' else []
 
         validated_data['reminders'] = reminders
         validated_data['assignee_reminders'] = assignee_reminders

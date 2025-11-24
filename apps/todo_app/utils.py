@@ -137,7 +137,7 @@ def get_user_reminders(user: Any,
     :param initial: Raw request data used to determine whether the ``reminders`` field was provided.
     :param reminders: Optional list of reminders provided by the caller. Returned unchanged when
                       ``reminders`` key is present in ``initial`` (or as an empty list when falsy).
-    :return: A list of reminders ready to be used by the application (may be empty).
+    :return: A list of reminders ready to be used by the application (maybe empty).
     """
 
     if 'reminders' in (initial or {}):

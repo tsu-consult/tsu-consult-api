@@ -214,6 +214,108 @@ class ToDoCreateTests(BaseTest):
         notif_exists = Notification.objects.filter(user=self.teacher1, title__icontains='Новая задача').exists()
         self.assertTrue(notif_exists)
 
+    def test_dean_creates_task_for_teacher_with_given_reminders(self):
+        future = timezone.now() + timedelta(hours=2)
+        data = {
+            'title': 'Task by Dean for Teacher',
+            'assignee_id': self.teacher1.id,
+            'deadline': future.isoformat(),
+            'reminders': [{'method': 'popup', 'minutes': 60}],
+        }
+
+        resp = self.post_as(self.dean, data)
+        self.assertEqual(resp.status_code, 201)
+
+        todo = ToDo.objects.get(title='Task by Dean for Teacher')
+        self.assertEqual(todo.assignee_id, self.teacher1.id)
+        self.assertTrue(isinstance(todo.reminders, list) and len(todo.reminders) > 0)
+        self.assertTrue(isinstance(todo.assignee_reminders, list) and len(
+            todo.assignee_reminders) > 0)
+
+    def test_dean_creates_task_for_teacher_with_empty_reminders(self):
+        future = timezone.now() + timedelta(hours=2)
+        data = {
+            'title': 'Task by Dean for Teacher with Empty Reminders',
+            'assignee_id': self.teacher1.id,
+            'deadline': future.isoformat(),
+            'reminders': []
+        }
+
+        resp = self.post_as(self.dean, data)
+        self.assertEqual(resp.status_code, 201)
+
+        todo = ToDo.objects.get(title='Task by Dean for Teacher with Empty Reminders')
+        self.assertEqual(todo.assignee_id, self.teacher1.id)
+        self.assertTrue(isinstance(todo.reminders, list) and len(todo.reminders) == 0)
+        self.assertTrue(isinstance(todo.assignee_reminders, list) and len(todo.assignee_reminders) > 0)
+
+    def test_dean_creates_task_for_teacher_without_reminders_key(self):
+        future = timezone.now() + timedelta(hours=2)
+        data = {
+            'title': 'Task by Dean for Teacher without Reminders Key',
+            'assignee_id': self.teacher1.id,
+            'deadline': future.isoformat(),
+        }
+
+        resp = self.post_as(self.dean, data)
+        self.assertEqual(resp.status_code, 201)
+
+        todo = ToDo.objects.get(title='Task by Dean for Teacher without Reminders Key')
+        self.assertEqual(todo.assignee_id, self.teacher1.id)
+        self.assertTrue(isinstance(todo.reminders, list) and len(todo.reminders) > 0)
+        self.assertTrue(isinstance(todo.assignee_reminders, list) and len(todo.assignee_reminders) > 0)
+
+    def test_teacher_creates_task_for_self_with_only_given_reminders(self):
+        future = timezone.now() + timedelta(hours=2)
+        data = {
+            'title': 'Task by Teacher for Self',
+            'deadline': future.isoformat(),
+            'reminders': [{'method': 'popup', 'minutes': 60}],
+        }
+
+        resp = self.post_as(self.teacher1, data)
+        self.assertEqual(resp.status_code, 201)
+
+        todo = ToDo.objects.get(title='Task by Teacher for Self')
+        self.assertEqual(todo.creator_id, self.teacher1.id)
+        self.assertEqual(todo.assignee_id, self.teacher1.id)
+        self.assertTrue(
+            isinstance(todo.reminders, list) and len(todo.reminders) > 0)
+        self.assertTrue(isinstance(todo.assignee_reminders, list) and len(todo.assignee_reminders) == 0)
+
+    def test_teacher_creates_task_for_self_with_empty_reminders(self):
+        future = timezone.now() + timedelta(hours=2)
+        data = {
+            'title': 'Task by Teacher for Self',
+            'deadline': future.isoformat(),
+            'reminders': [],
+        }
+
+        resp = self.post_as(self.teacher1, data)
+        self.assertEqual(resp.status_code, 201)
+
+        todo = ToDo.objects.get(title='Task by Teacher for Self')
+        self.assertEqual(todo.creator_id, self.teacher1.id)
+        self.assertEqual(todo.assignee_id, self.teacher1.id)
+        self.assertTrue(isinstance(todo.reminders, list) and len(todo.reminders) == 0)
+        self.assertTrue(isinstance(todo.assignee_reminders, list) and len(todo.assignee_reminders) == 0)
+
+    def test_teacher_creates_task_for_self_without_reminders_key(self):
+        future = timezone.now() + timedelta(hours=2)
+        data = {
+            'title': 'Task by Teacher for Self',
+            'deadline': future.isoformat()
+        }
+
+        resp = self.post_as(self.teacher1, data)
+        self.assertEqual(resp.status_code, 201)
+
+        todo = ToDo.objects.get(title='Task by Teacher for Self')
+        self.assertEqual(todo.creator_id, self.teacher1.id)
+        self.assertEqual(todo.assignee_id, self.teacher1.id)
+        self.assertTrue(isinstance(todo.reminders, list) and len(todo.reminders) > 0)
+        self.assertTrue(isinstance(todo.assignee_reminders, list) and len(todo.assignee_reminders) == 0)
+
 
 class ToDoPermissionTests(TestCase):
     def setUp(self):
