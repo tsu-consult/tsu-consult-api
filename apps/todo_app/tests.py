@@ -699,6 +699,24 @@ class ToDoListViewTestCase(APITestCase):
         self.todo3 = ToDo.objects.create(title="Another Teacher's Task", creator=self.dean, assignee=self.teacher,
                                          status="in progress")
 
+    def create_tasks(self, count, creator=None):
+        if creator is None:
+            creator = self.teacher
+        for i in range(count):
+            ToDo.objects.create(title=f"Task {i + 1}", creator=creator, assignee=creator)
+
+    def authenticate_and_check_todos(self, user, expected_todos_count, expected_titles):
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get(reverse('todo-list'))
+
+        self.assertEqual(response.status_code, 200)
+        todos = response.data['results']
+        self.assertEqual(len(todos), expected_todos_count)
+
+        for title in expected_titles:
+            self.assertTrue(any(todo['title'] == title for todo in todos))
+
     def test_admin_cannot_access_todos(self):
         admin = User.objects.create_user(email="admin_test@example.com", username="admin_test", role="admin")
         self.client.force_authenticate(user=admin)
@@ -708,27 +726,12 @@ class ToDoListViewTestCase(APITestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_teacher_can_access_own_and_assigned_todos(self):
-        self.client.force_authenticate(user=self.teacher)
-
-        response = self.client.get(reverse('todo-list'))
-
-        self.assertEqual(response.status_code, 200)
-        todos = response.data['results']
-        self.assertEqual(len(todos), 3)
-        self.assertTrue(any(todo['title'] == "Teacher's Task" for todo in todos))
-        self.assertTrue(any(todo['title'] == "Assigned Task" for todo in todos))
-        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+        expected_titles = ["Teacher's Task", "Assigned Task", "Another Teacher's Task"]
+        self.authenticate_and_check_todos(self.teacher, 3, expected_titles)
 
     def test_dean_can_access_all_todos(self):
-        self.client.force_authenticate(user=self.dean)
-
-        response = self.client.get(reverse('todo-list'))
-
-        self.assertEqual(response.status_code, 200)
-        todos = response.data['results']
-        self.assertEqual(len(todos), 2)
-        self.assertTrue(any(todo['title'] == "Assigned Task" for todo in todos))
-        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+        expected_titles = ["Assigned Task", "Another Teacher's Task"]
+        self.authenticate_and_check_todos(self.dean, 2, expected_titles)
 
     def test_student_cannot_access_todos(self):
         self.client.force_authenticate(user=self.student)
@@ -761,8 +764,7 @@ class ToDoListViewTestCase(APITestCase):
     def test_pagination(self):
         self.client.force_authenticate(user=self.teacher)
 
-        for i in range(15):
-            ToDo.objects.create(title=f"Task {i + 1}", creator=self.teacher, assignee=self.teacher)
+        self.create_tasks(15)
 
         response = self.client.get(reverse('todo-list'))
 
@@ -774,8 +776,7 @@ class ToDoListViewTestCase(APITestCase):
     def test_second_page_pagination(self):
         self.client.force_authenticate(user=self.teacher)
 
-        for i in range(15):
-            ToDo.objects.create(title=f"Task {i + 1}", creator=self.teacher, assignee=self.teacher)
+        self.create_tasks(15)
 
         response = self.client.get(reverse('todo-list'), {'page': 2})
 
@@ -800,15 +801,8 @@ class ToDoListViewTestCase(APITestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_teacher_can_only_see_own_and_assigned_todos(self):
-        self.client.force_authenticate(user=self.teacher)
-
-        response = self.client.get(reverse('todo-list'))
-        self.assertEqual(response.status_code, 200)
-        todos = response.data['results']
-        self.assertEqual(len(todos), 3)
-        self.assertTrue(any(todo['title'] == "Teacher's Task" for todo in todos))
-        self.assertTrue(any(todo['title'] == "Assigned Task" for todo in todos))
-        self.assertTrue(any(todo['title'] == "Another Teacher's Task" for todo in todos))
+        expected_titles = ["Teacher's Task", "Assigned Task", "Another Teacher's Task"]
+        self.authenticate_and_check_todos(self.teacher, 3, expected_titles)
 
         another_teacher = User.objects.create_user(email="teacher2@example.com", username="teacher2", role="teacher")
         ToDo.objects.create(title="Other Teacher's Task", creator=another_teacher,
