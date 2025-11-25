@@ -1,26 +1,98 @@
 import logging
 
+from django.db import DatabaseError
+from django.db.models import Q
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from googleapiclient.errors import HttpError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.db.models import Q
 
 from apps.auth_app.permissions import IsActive, IsTeacherOrDean
 from apps.notification_app.models import Notification
+from apps.todo_app.models import ToDo
 from apps.todo_app.serializers import ToDoRequestSerializer, ToDoResponseSerializer, PaginatedToDosSerializer, \
     ToDoListResponseSerializer
 from apps.todo_app.services import (
     GoogleCalendarService
 )
 from apps.todo_app.utils import (sync_and_handle_event)
+from core.exceptions import GoogleCalendarAuthRequired
 from core.mixins import ErrorResponseMixin
-from core.serializers import ErrorResponseSerializer
 from core.pagination import DefaultPagination
-from apps.todo_app.models import ToDo
+from core.serializers import ErrorResponseSerializer
 
 logger = logging.getLogger(__name__)
+
+
+def _get_todo_or_response(request, todo_id):
+    try:
+        tid = int(todo_id)
+    except (ValueError, TypeError):
+        return None, ErrorResponseMixin.format_error(request, 400, "Bad Request", f"Invalid todo id: {todo_id}")
+
+    try:
+        todo = ToDo.objects.get(id=tid)
+    except ToDo.DoesNotExist:
+        return None, ErrorResponseMixin.format_error(request, 404, "Not Found", f"ToDo with id={tid} not found.")
+
+    return todo, None
+
+
+def _sync_calendars_and_notify(todo, actor_user, old_assignee=None, notify_assignee_on_create=False):
+    try:
+        if getattr(actor_user, 'id', None) == getattr(todo.creator, 'id', None):
+            calendar_service = GoogleCalendarService(user=actor_user)
+            sync_and_handle_event(todo, calendar_service, todo.reminders, target_user=actor_user, for_creator=True)
+        elif getattr(actor_user, 'id', None) == getattr(getattr(todo, 'assignee', None), 'id', None):
+            assignee_calendar_service = GoogleCalendarService(user=actor_user)
+            sync_and_handle_event(todo, assignee_calendar_service, todo.assignee_reminders,
+                                  target_user=actor_user, for_creator=False)
+        else:
+            calendar_service = GoogleCalendarService(user=actor_user)
+            sync_and_handle_event(todo, calendar_service, todo.reminders, target_user=actor_user, for_creator=True)
+    except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
+        logger.exception("Failed to sync calendar after creating/updating todo id=%s: %s",
+                         getattr(todo, 'id', None), exc)
+
+    if todo.assignee and getattr(todo.assignee, 'id', None) != getattr(actor_user, 'id', None):
+        try:
+            assignee_calendar_service = GoogleCalendarService(user=todo.assignee)
+            sync_and_handle_event(todo, assignee_calendar_service, todo.assignee_reminders, target_user=todo.assignee)
+        except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
+            logger.exception("Failed to sync calendar for assignee after creating/updating todo id=%s: %s",
+                             getattr(todo, 'id', None), exc)
+
+    if (notify_assignee_on_create and todo.assignee and getattr(todo.assignee, 'id', None) !=
+            getattr(actor_user, 'id', None)):
+        try:
+            Notification.objects.create(
+                user=todo.assignee,
+                title="Новая задача",
+                message=f'Вам назначена задача: "{todo.title}".\n\nЧтобы просмотреть детали, перейдите в раздел "📝 '
+                        f'Мои задачи".',
+                type=Notification.Type.TELEGRAM,
+            )
+        except DatabaseError as exc:
+            logger.exception("Failed to create notification for assignee on create for todo id=%s: %s",
+                             getattr(todo, 'id', None), exc)
+
+    if old_assignee is not None:
+        new_assignee = getattr(todo, 'assignee', None)
+        if new_assignee and (old_assignee is None or getattr(old_assignee, 'id', None) !=
+                             getattr(new_assignee, 'id', None)):
+            try:
+                Notification.objects.create(
+                    user=new_assignee,
+                    title="Вас назначили на задачу",
+                    message=f'Вам назначена задача: "{todo.title}".\n\nЧтобы просмотреть детали, перейдите в раздел '
+                            f'"📝 Мои задачи".',
+                    type=Notification.Type.TELEGRAM,
+                )
+            except DatabaseError as exc:
+                logger.exception("Failed to create notification for new assignee for todo id=%s: %s",
+                                 getattr(todo, 'id', None), exc)
 
 
 class ToDoCreateView(ErrorResponseMixin, APIView):
@@ -46,20 +118,7 @@ class ToDoCreateView(ErrorResponseMixin, APIView):
         serializer.is_valid(raise_exception=True)
         todo = serializer.save()
 
-        calendar_service = GoogleCalendarService(user=request.user)
-        sync_and_handle_event(todo, calendar_service, todo.reminders, target_user=request.user, for_creator=True)
-
-        if todo.assignee and todo.assignee != request.user:
-            assignee_calendar_service = GoogleCalendarService(user=todo.assignee)
-            sync_and_handle_event(todo, assignee_calendar_service, todo.assignee_reminders, todo.assignee)
-
-            Notification.objects.create(
-                user=todo.assignee,
-                title="Новая задача",
-                message=f'Вам назначена задача: "{todo.title}".\n\nЧтобы просмотреть детали, перейдите в раздел "📝 Мои '
-                        f'задачи".',
-                type=Notification.Type.TELEGRAM,
-            )
+        _sync_calendars_and_notify(todo, request.user, old_assignee=None, notify_assignee_on_create=True)
 
         return Response(ToDoResponseSerializer(todo).data, status=201)
 
@@ -118,19 +177,45 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         },
     )
     def get(self, request, todo_id):
-        try:
-            tid = int(todo_id)
-        except (ValueError, TypeError):
-            return self.format_error(request, 400, "Bad Request", f"Invalid todo id: {todo_id}")
-
-        try:
-            todo = ToDo.objects.get(id=tid)
-        except ToDo.DoesNotExist:
-            return self.format_error(request, 404, "Not Found",
-                                     f"ToDo with id={tid} not found.")
+        todo, err = _get_todo_or_response(request, todo_id)
+        if err:
+            return err
 
         if not todo.is_accessible_by(request.user):
             return self.format_error(request, 403, "Forbidden",
                                      "You do not have permission to perform this action.")
+
+        return Response(ToDoResponseSerializer(todo).data, status=200)
+
+    @swagger_auto_schema(
+        tags=["To Do"],
+        operation_summary="Обновление задачи",
+        operation_description="Редактирование задачи доступно только создателю или назначенному преподавателю.",
+        request_body=ToDoRequestSerializer,
+        responses={
+            200: openapi.Response(description="Задача обновлена", schema=ToDoResponseSerializer),
+            400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Не найдено", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def put(self, request, todo_id):
+        todo, err = _get_todo_or_response(request, todo_id)
+        if err:
+            return err
+
+        if not todo.is_accessible_by(request.user):
+            return self.format_error(request, 403, "Forbidden",
+                                     "You do not have permission to perform this action.")
+
+        serializer = ToDoRequestSerializer(instance=todo, data=request.data, context={"request": request}, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        old_assignee = todo.assignee
+        todo = serializer.save()
+
+        _sync_calendars_and_notify(todo, request.user, old_assignee)
 
         return Response(ToDoResponseSerializer(todo).data, status=200)

@@ -50,9 +50,6 @@ class ToDo(models.Model):
             self.creator_id == user.id or (self.assignee_id and self.assignee_id == user.id)
         )
 
-    def is_editable_by(self, user):
-        return bool(user and user.is_authenticated and self.creator_id == user.id)
-
     def create_calendar_event(self, calendar_service, reminders=None, for_creator=False):
         if not self.deadline:
             return None

@@ -1,8 +1,9 @@
-from datetime import timedelta
-from unittest.mock import patch, Mock
 from contextlib import contextmanager
+from datetime import timedelta
 from typing import Optional
+from unittest.mock import patch, Mock
 
+from celery.exceptions import CeleryError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -11,11 +12,10 @@ from rest_framework.test import APIClient, APITestCase
 
 from apps.auth_app.models import User
 from apps.notification_app.models import Notification
+from apps.todo_app.config import MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH
 from apps.todo_app.models import ToDo
 from apps.todo_app.services import FallbackReminderService
 from apps.todo_app.utils import normalize_reminders_for_fallback
-from apps.todo_app.config import MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH
-from celery.exceptions import CeleryError
 
 
 class BaseTest(TestCase):
@@ -895,3 +895,95 @@ class ToDoDetailViewTestCase(APITestCase):
         self.client.force_authenticate(user=None)
         response = self.client.get(f"/todo/{self.todo.id}/")
         self.assertEqual(response.status_code, 401)
+
+
+class ToDoUpdateTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(email="teacher@example.com", username="teacher", role="teacher")
+        self.dean = User.objects.create_user(email="dean@example.com", username="dean", role="dean")
+        self.other_teacher = User.objects.create_user(email="other@example.com", username="other", role="teacher")
+
+        self.todo = ToDo.objects.create(
+            title="Initial title",
+            description="Initial desc",
+            deadline=timezone.now() + timedelta(days=1),
+            creator=self.dean,
+            assignee=self.teacher
+        )
+
+        self.url = f"/todo/{self.todo.id}/"
+
+    def test_update_as_creator(self):
+        self.client.force_authenticate(user=self.dean)
+        data = {"title": "Updated title"}
+        with patch("apps.todo_app.views._sync_calendars_and_notify") as mock_sync:
+            response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.title, "Updated title")
+        mock_sync.assert_called_once()
+
+    def test_update_as_assignee_allowed_fields(self):
+        self.client.force_authenticate(user=self.teacher)
+        reminders = [{"method": "popup", "minutes": 10}]
+        data = {"status": "done", "reminders": reminders}
+        with patch("apps.todo_app.views._sync_calendars_and_notify") as mock_sync:
+            response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.status, "done")
+        self.assertEqual(self.todo.reminders, reminders)
+        mock_sync.assert_called_once()
+
+    def test_update_as_assignee_forbidden_fields(self):
+        self.client.force_authenticate(user=self.teacher)
+        data = {"title": "New title"}
+        response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_update_as_other_user_forbidden(self):
+        self.client.force_authenticate(user=self.other_teacher)
+        data = {"title": "Attempted update"}
+        response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_update_invalid_title_length(self):
+        self.client.force_authenticate(user=self.dean)
+        data = {"title": "x" * 300}
+        response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("title", response.data.get("message", {}))
+
+    def test_update_invalid_deadline(self):
+        self.client.force_authenticate(user=self.dean)
+        data = {"deadline": timezone.now() - timedelta(days=1)}
+        response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("deadline", response.data.get("message", {}))
+
+    @patch("apps.todo_app.views.GoogleCalendarService")
+    @patch("apps.todo_app.views.sync_and_handle_event")
+    def test_update_triggers_calendar_sync(self, mock_sync, mock_calendar_service):
+        self.client.force_authenticate(user=self.dean)
+        response = self.client.put(self.url, {"title": "Updated title"}, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        self.assertTrue(mock_calendar_service.called)
+        self.assertTrue(mock_sync.called)
+
+    @patch("apps.todo_app.views._sync_calendars_and_notify")
+    @patch("apps.todo_app.views.GoogleCalendarService")
+    def test_update_notifies_new_assignee(self, mock_calendar, mock_sync_notify):
+        self.client.force_authenticate(user=self.dean)
+        data = {"assignee_id": self.other_teacher.id}
+
+        response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        mock_sync_notify.assert_called_once()
