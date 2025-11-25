@@ -3,6 +3,7 @@ import logging
 
 from rest_framework.exceptions import ValidationError
 from googleapiclient.errors import HttpError
+from celery.exceptions import CeleryError
 
 from core.exceptions import GoogleCalendarAuthRequired
 
@@ -193,11 +194,10 @@ def sync_and_handle_event(td: Any,
                 try:
                     from apps.todo_app.services import FallbackReminderService
                     FallbackReminderService().schedule_fallback_reminders(td, reminders, target_user=target_user)
-                except Exception as exc2:
+                except (CeleryError, RuntimeError) as exc2:
                     logger.exception("Failed to schedule fallback reminders after Google API error for todo id=%s: %s",
                                      getattr(td, 'id', '<unknown>'), exc2)
-            raise
-        except Exception as exc:
+        except (ValueError, TypeError, AttributeError) as exc:
             logger.exception("Calendar sync failed for todo id=%s: %s", getattr(td, 'id', '<unknown>'), exc)
             event_id = None
 
@@ -206,7 +206,7 @@ def sync_and_handle_event(td: Any,
         try:
             from apps.todo_app.services import FallbackReminderService
             FallbackReminderService().schedule_fallback_reminders(td, reminders, target_user=target_user)
-        except Exception as exc:
+        except (CeleryError, RuntimeError) as exc:
             logger.exception("Failed to schedule fallback reminders for todo id=%s: %s",
                              getattr(td, 'id', '<unknown>'), exc)
             raise

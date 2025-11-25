@@ -38,7 +38,7 @@ def stop_celery(process):
         process.terminate()
         process.wait(timeout=5)
         print("✅ Celery worker stopped.")
-    except Exception as e:
+    except (OSError, RuntimeError, TimeoutError) as e:
         print(f"⚠️ Failed to stop Celery: {e}")
 
 

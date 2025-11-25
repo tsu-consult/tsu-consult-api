@@ -10,6 +10,7 @@ from django.utils import timezone
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 from requests.exceptions import RequestException
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from apps.notification_app.models import Notification
 from apps.notification_app.services import send_telegram_notification
 from apps.todo_app.models import ToDo
@@ -29,7 +30,7 @@ def _save_last_sync_error(todo: ToDo, exc):
     try:
         todo.last_sync_error = str(exc)
         todo.save(update_fields=["last_sync_error"])
-    except Exception as e:
+    except DatabaseError as e:
         logger.exception("Failed to save last_sync_error for todo %s: %s", getattr(todo, "id", None), e)
 
 
@@ -71,10 +72,12 @@ def _create_or_skip_notification(user_id: Type[int], todo: ToDo, title: str,
             n.last_error = None
             n.celery_task_id = None
             n.save(update_fields=["status", "message", "last_error", "celery_task_id"])
-            logger.info("Reactivated notification %s for user %s todo %s (scheduled_for=%s)", n.id, user_id, getattr(todo, 'id', None), scheduled_for)
+            logger.info("Reactivated notification %s for user %s todo %s (scheduled_for=%s)",
+                        n.id, user_id, getattr(todo, 'id', None), scheduled_for)
             return n
-        except Exception as exc:
-            logger.exception("Failed to reactivate existing notification %s: %s", getattr(n, 'id', None), exc)
+        except (DatabaseError, IntegrityError) as exc:
+            logger.exception("Failed to reactivate existing notification %s (DB error): %s", getattr(n, 'id', None),
+                             exc)
             return None
     except (IntegrityError, DatabaseError) as exc:
         logger.exception("DB error while creating/reactivating Notification: %s", exc)
@@ -84,7 +87,7 @@ def _create_or_skip_notification(user_id: Type[int], todo: ToDo, title: str,
 def _normalize_unique_minutes(reminders_raw) -> list[int]:
     try:
         return normalize_reminders_for_fallback(reminders_raw)
-    except Exception as exc:
+    except (ValueError, TypeError, DRFValidationError) as exc:
         logger.debug("normalize_reminders_for_fallback failed: %s", exc)
         return []
 
@@ -145,8 +148,8 @@ def sync_existing_todos(self, user_id: int):
     except User.DoesNotExist:
         logger.warning("User %s does not exist, abort sync_existing_todos", user_id)
         return
-    except Exception as exc:
-        logger.exception("Unexpected error loading user %s: %s", user_id, exc)
+    except DatabaseError as exc:
+        logger.exception("DB error loading user %s: %s", user_id, exc)
         return
 
     creator_qs = ToDo.objects.filter(creator=user)
@@ -191,7 +194,7 @@ def sync_existing_todos(self, user_id: int):
                     td.save(update_fields=update_fields)
                     logger.info("Cleared %s for todo %s because user %s has no calendar service",
                                 event_field, td.id, getattr(participant_user, "id", None))
-                except Exception as e:
+                except DatabaseError as e:
                     logger.exception("Failed clearing calendar fields for todo %s: %s", td.id, e)
             else:
                 logger.debug("No calendar service and no event id for todo %s (role=%s)", td.id, role)
@@ -217,7 +220,7 @@ def sync_existing_todos(self, user_id: int):
                         try:
                             calendar_service.edit_event()
                             # TODO: calendar_service.edit_event(todo, existing_event_id, reminders=reminders)
-                        except Exception as e:
+                        except (AttributeError, RuntimeError, TypeError) as e:
                             logger.debug("edit_event failed/absent for todo %s: %s", td.id, e)
                     return
                 except EventNotFound:
@@ -241,7 +244,7 @@ def sync_existing_todos(self, user_id: int):
                             td.save(update_fields=update_fields)
                             logger.info("Attached found existing event %s -> todo %s (role=%s)",
                                         eid, td.id, role)
-                        except Exception as e:
+                        except DatabaseError as e:
                             logger.exception("Failed attaching found event id %s to todo %s: %s",
                                              eid, td.id, e)
                         return
@@ -258,9 +261,8 @@ def sync_existing_todos(self, user_id: int):
                                         created_id, td.id, role)
                         else:
                             _save_last_sync_error(td, "create_event_returned_none")
-                            logger.warning("create_event returned None for todo %s (role=%s)",
-                                           td.id, role)
-                        return
+                            logger.warning("create_event returned None for todo %s (role=%s)", td.id, role)
+                            return
                     except RefreshError as e:
                         _save_last_sync_error(td, e)
                         logger.info("RefreshError while recreating event for todo %s (role=%s): %s",
@@ -278,7 +280,7 @@ def sync_existing_todos(self, user_id: int):
                         logger.exception("Google HttpError while recreating event for todo %s (role=%s): %s",
                                          td.id, role, e)
                         return
-                    except Exception as e:
+                    except (RequestException, HttpError, DatabaseError, RuntimeError, ValueError, TypeError) as e:
                         _save_last_sync_error(td, e)
                         logger.exception("Unexpected error while recreating event for todo %s (role=%s): %s",
                                          td.id, role, e)
@@ -300,7 +302,7 @@ def sync_existing_todos(self, user_id: int):
                         update_fields = [f for f in (event_field, active_field) if hasattr(td, f)]
                         td.save(update_fields=update_fields)
                         logger.info("Found and attached event %s -> todo %s (role=%s)", eid, td.id, role)
-                    except Exception as e:
+                    except DatabaseError as e:
                         logger.exception("Failed attaching found event id %s to todo %s: %s", eid, td.id, e)
                     return
 
@@ -331,7 +333,7 @@ def sync_existing_todos(self, user_id: int):
                     _save_last_sync_error(td, e)
                     logger.exception("Google HttpError creating event for todo %s (role=%s): %s",
                                      td.id, role, e)
-                except Exception as e:
+                except (RequestException, HttpError, DatabaseError, RuntimeError, ValueError, TypeError) as e:
                     _save_last_sync_error(td, e)
                     logger.exception("Unexpected error creating event for todo %s (role=%s): %s",
                                      td.id, role, e)
@@ -358,7 +360,7 @@ def sync_existing_todos(self, user_id: int):
     for todo in creator_qs:
         try:
             _process(todo, "creator", user)
-        except Exception as exc:
+        except (RequestException, HttpError, DatabaseError, RuntimeError, ValueError, TypeError) as exc:
             _save_last_sync_error(todo, exc)
             logger.exception("Unexpected error processing creator todo %s for user %s: %s",
                              getattr(todo, "id", None), user_id, exc)
@@ -369,7 +371,7 @@ def sync_existing_todos(self, user_id: int):
             continue
         try:
             _process(todo, "assignee", assignee_user)
-        except Exception as exc:
+        except (RequestException, HttpError, DatabaseError, RuntimeError, ValueError, TypeError) as exc:
             _save_last_sync_error(todo, exc)
             logger.exception("Unexpected error processing assignee todo %s for user %s: %s",
                              getattr(todo, "id", None), user_id, exc)
@@ -386,7 +388,7 @@ def transfer_unsent_reminders_task(user_id: int):
         if GoogleToken.objects.filter(user_id=user_id).exists():
             logger.info("User %s has GoogleToken again — skipping transfer_unsent_reminders_task", user_id)
             return
-    except Exception as e:
+    except DatabaseError as e:
         logger.debug("Error checking GoogleToken existence for user %s: %s", user_id, e)
 
     try:
@@ -468,13 +470,13 @@ def transfer_unsent_reminders_task(user_id: int):
     for t in creator_qs:
         try:
             _process(t, "creator")
-        except Exception as exc:
+        except (RequestException, HttpError, DatabaseError, RuntimeError, ValueError, TypeError) as exc:
             logger.exception("Error processing creator todo %s: %s", t.id, exc)
 
     for t in assignee_qs:
         try:
             _process(t, "assignee")
-        except Exception as exc:
+        except (RequestException, HttpError, DatabaseError, RuntimeError, ValueError, TypeError) as exc:
             logger.exception("Error processing assignee todo %s: %s", t.id, exc)
 
     logger.info("transfer_unsent_reminders_task finished for user_id=%s", user_id)
@@ -504,8 +506,10 @@ def cancel_pending_fallbacks_for_user(user_id: int):
                 current_app.control.revoke(n.celery_task_id, terminate=False)
                 revoked = True
                 logger.debug("Revoked celery task %s for notification %s", n.celery_task_id, n.id)
-        except Exception as e:
+        except CeleryError as e:
             logger.warning("Failed to revoke task %s for notification %s: %s", n.celery_task_id, n.id, e)
+        except RuntimeError as e:
+            logger.warning("Failed to revoke task %s for notification %s (runtime): %s", n.celery_task_id, n.id, e)
 
         try:
             n.status = Notification.Status.CANCELLED
@@ -513,5 +517,5 @@ def cancel_pending_fallbacks_for_user(user_id: int):
             n.celery_task_id = None
             n.save(update_fields=["status", "last_error", "celery_task_id"])
             logger.debug("Marked notification %s as CANCELLED (revoked=%s)", n.id, revoked)
-        except Exception as e:
-            logger.warning("Failed to update notification %s: %s", n.id, e)
+        except DatabaseError as e:
+            logger.warning("Failed to update notification %s (DB error): %s", n.id, e)

@@ -72,8 +72,4 @@ class ToDo(models.Model):
         except (AttributeError, TypeError, ValueError) as exc:
             logger.exception("Calendar sync failed for todo id=%s: %s", getattr(self, 'id', '<unknown>'), exc)
             return None
-        except Exception as exc:
-            logger.exception("Unexpected error while creating calendar event for todo id=%s: %s",
-                             getattr(self, 'id', '<unknown>'), exc)
-            raise
         return None
