@@ -264,6 +264,31 @@ class GoogleCalendarService:
                 return timezone.localtime(dt)
         return dt
 
+    def _build_event_body(self, todo: ToDo, reminders: Optional[List[Dict[str, Any]]]):
+        description = self._format_event_description(todo)
+        start = self._make_aware_datetime(todo.deadline)
+        end = start
+
+        is_creator = bool(self.user and getattr(self.user, 'id', None) == getattr(todo, 'creator_id', None))
+
+        extended_props = {
+            'private': {
+                'todo_id': str(getattr(todo, 'id', '')),
+                'role': 'creator' if is_creator else 'assignee'
+            }
+        }
+
+        event_body = {
+            "summary": f"[{todo.get_status_display()}] {todo.title} — To Do",
+            "description": description,
+            "start": {"dateTime": start.isoformat(), "timeZone": self.TIMEZONE},
+            "end": {"dateTime": end.isoformat(), "timeZone": self.TIMEZONE},
+            "reminders": {"useDefault": False, "overrides": reminders},
+            "extendedProperties": extended_props,
+        }
+
+        return event_body
+
     def create_event(self, todo: ToDo, reminders: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
         if not getattr(todo, "deadline", None):
             return None
@@ -299,28 +324,7 @@ class GoogleCalendarService:
             logger.debug("create_event: existing event found for todo %s -> %s", getattr(todo, 'id', None), eid)
             return eid
 
-        description = self._format_event_description(todo)
-
-        start = self._make_aware_datetime(todo.deadline)
-        end = start
-
-        is_creator = bool(self.user and getattr(self.user, 'id', None) == getattr(todo, 'creator_id', None))
-
-        extended_props = {
-            'private': {
-                'todo_id': str(getattr(todo, 'id', '')),
-                'role': 'creator' if is_creator else 'assignee'
-            }
-        }
-
-        event_body = {
-            "summary": f"[{todo.get_status_display()}] {todo.title} — To Do",
-            "description": description,
-            "start": {"dateTime": start.isoformat(), "timeZone": self.TIMEZONE},
-            "end": {"dateTime": end.isoformat(), "timeZone": self.TIMEZONE},
-            "reminders": {"useDefault": False, "overrides": reminders},
-            "extendedProperties": extended_props,
-        }
+        event_body = self._build_event_body(todo, reminders)
 
         try:
             created_event = self.service.events().insert(calendarId=self.calendar_id, body=event_body).execute()
@@ -398,12 +402,6 @@ class GoogleCalendarService:
             )
             raise
 
-    def edit_event(self):
-        return True
-
-    def delete_event(self):
-        return True
-
     def find_event_for_todo(self, todo: ToDo) -> Optional[Dict[str, Any]]:
         if not self.service:
             return None
@@ -442,3 +440,76 @@ class GoogleCalendarService:
                 getattr(todo, 'id', None), getattr(self.user, 'id', None), exc,
             )
             return None
+
+    def update_event(self, todo=None, reminders=None):
+        if todo is None or not getattr(todo, 'deadline', None):
+            return False
+
+        try:
+            self._ensure_credentials_valid()
+        except RefreshError:
+            raise
+
+        if not self.service:
+            return False
+
+        if not self.calendar_id:
+            try:
+                self._get_or_create_calendar()
+            except HttpError as exc:
+                logger.exception(
+                    "Google API HttpError while getting/creating system calendar for user id=%s: %s",
+                    getattr(self.user, 'id', None), exc,
+                )
+                return False
+            if not self.calendar_id:
+                return False
+
+        try:
+            existing = self.find_event_for_todo(todo)
+        except (HttpError, RequestException, ValueError, TypeError) as exc:
+            existing = None
+            logger.debug("find_event_for_todo raised while updating event for todo %s: %s",
+                         getattr(todo, 'id', None), exc)
+
+        if not existing:
+            return False
+
+        event_id = existing.get('id')
+
+        event_body = self._build_event_body(todo, reminders)
+
+        try:
+            updated = self.service.events().patch(calendarId=self.calendar_id, eventId=event_id,
+                                                  body=event_body).execute()
+            return bool(updated)
+        except RefreshError:
+            self._handle_refresh_error()
+        except HttpError as exc:
+            status = None
+            try:
+                status_raw = getattr(exc.resp, 'status', None)
+                if status_raw is not None:
+                    status = int(status_raw)
+            except (AttributeError, TypeError, ValueError):
+                status = None
+
+            if status == 404:
+                return False
+            if status in (401, 403):
+                self._handle_refresh_error()
+
+            logger.exception(
+                "Google API HttpError while updating event for user id=%s, todo id=%s: %s",
+                getattr(self.user, 'id', None), getattr(todo, 'id', None), exc,
+            )
+            return False
+        except (ValueError, TypeError) as exc:
+            logger.exception(
+                "Invalid data while updating event for user id=%s, todo id=%s: %s",
+                getattr(self.user, 'id', None), getattr(todo, 'id', None), exc,
+            )
+            return False
+
+    def delete_event(self):
+        return True
