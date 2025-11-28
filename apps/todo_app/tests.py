@@ -1093,3 +1093,19 @@ class ToDoUpdateTests(APITestCase):
         notif_exists = Notification.objects.filter(user=self.other_teacher,
                                                    title__icontains='Вас назначили на задачу').exists()
         self.assertTrue(notif_exists)
+
+    def test_only_assignee_can_change_status_dean_cannot(self):
+        self.client.force_authenticate(user=self.dean)
+        data = {"status": "done"}
+        response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        message = response.data.get('message', {}) if isinstance(getattr(response, 'data', None), dict) else response.data
+        self.assertTrue(isinstance(message, dict) and 'status' in message)
+
+    def test_only_assignee_can_change_status_other_teacher_forbidden(self):
+        self.client.force_authenticate(user=self.other_teacher)
+        data = {"status": "done"}
+        response = self.client.put(self.url, data, format="json")
+
+        self.assertIn(response.status_code, (403, 404))

@@ -74,6 +74,13 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"title": f"The title must be at most {MAX_TITLE_LENGTH} "
                                                         f"characters long."})
 
+        instance = getattr(self, 'instance', None)
+        if instance is not None and 'status' in (raw_initial or {}):
+            assignee_id = getattr(getattr(instance, 'assignee', None), 'id', None)
+            user_id = getattr(user, 'id', None)
+            if assignee_id != user_id:
+                raise serializers.ValidationError({'status': 'Only assignee may change status.'})
+
         description = attrs.get("description")
         if description and len(description) > MAX_DESCRIPTION_LENGTH:
             raise serializers.ValidationError({
