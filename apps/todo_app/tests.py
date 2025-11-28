@@ -1037,3 +1037,59 @@ class ToDoUpdateTests(APITestCase):
             response = self.client.put(self.url, data, format="json")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_put_changes_assignee_marks_fallback_notifications_failed_if_old_not_integrated(self):
+        future = timezone.now() + timedelta(hours=1)
+        pending_notif = Notification.objects.create(
+            user=self.teacher,
+            todo=self.todo,
+            title='Напоминание о задаче',
+            message='Test',
+            type=Notification.Type.TELEGRAM,
+            status=Notification.Status.PENDING,
+            scheduled_for=future,
+            celery_task_id='celery-123'
+        )
+
+        self.client.force_authenticate(user=self.dean)
+        data = {"assignee_id": self.other_teacher.id}
+
+        with patch("apps.todo_app.calendar.managers.GoogleCalendarService") as mock_calendar_manager_gc, \
+             patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc, \
+             patch('celery.current_app.control.revoke') as mock_revoke:
+            mock_calendar_manager_gc.return_value.service = False
+
+            mock_utils_inst = mock_utils_gc.return_value
+            mock_utils_inst.service = False
+
+            response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+
+        pending_notif.refresh_from_db()
+        self.assertEqual(pending_notif.status, Notification.Status.FAILED)
+        self.assertIsNone(pending_notif.celery_task_id)
+        self.assertIn('Assignee changed', (pending_notif.last_error or ''))
+        mock_revoke.assert_called_once_with('celery-123', terminate=False)
+
+    def test_put_changes_assignee_deletes_old_calendar_event_if_integrated(self):
+        self.client.force_authenticate(user=self.dean)
+        data = {
+            "assignee_id": self.other_teacher.id
+        }
+
+        with patch("apps.todo_app.calendar.managers.GoogleCalendarService") as mock_calendar_manager_gc, \
+             patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc:
+            mock_calendar_manager_gc.return_value.service = False
+
+            mock_utils_inst = mock_utils_gc.return_value
+            mock_utils_inst.service = True
+            mock_utils_inst.delete_event = Mock()
+
+            response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        mock_utils_inst.delete_event.assert_called_once()
+        notif_exists = Notification.objects.filter(user=self.other_teacher,
+                                                   title__icontains='Вас назначили на задачу').exists()
+        self.assertTrue(notif_exists)

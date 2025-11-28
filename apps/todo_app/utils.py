@@ -1,6 +1,8 @@
 ﻿import logging
 from typing import Any, Dict, List, Optional
 
+from celery import current_app
+from celery.exceptions import CeleryError
 from django.db import DatabaseError
 from googleapiclient.errors import HttpError
 from rest_framework.exceptions import ValidationError
@@ -190,8 +192,28 @@ def _notify_new_assignee_and_cleanup_old(todo: ToDo, old_assignee: Optional[User
     if old_assignee and new_assignee and getattr(old_assignee, 'id', None) != getattr(new_assignee, 'id', None):
         try:
             old_assignee_service = GoogleCalendarService(user=old_assignee)
-            if getattr(old_assignee_service, 'delete_event', None):
-                old_assignee_service.delete_event()
+            if getattr(old_assignee_service, 'service', None):
+                if getattr(old_assignee_service, 'delete_event', None):
+                    old_assignee_service.delete_event()
+            else:
+                try:
+                    pending = Notification.objects.filter(user=old_assignee, todo=todo,
+                                                          status=Notification.Status.PENDING)
+                    for n in pending:
+                        try:
+                            if n.celery_task_id:
+                                current_app.control.revoke(n.celery_task_id, terminate=False)
+                        except (CeleryError, RuntimeError) as e:
+                            logger.warning("Failed to revoke celery task %s for notification %s: %s",
+                                           n.celery_task_id, n.id, e)
+
+                        n.status = Notification.Status.FAILED
+                        n.last_error = 'Assignee changed and no calendar integration; fallback disabled.'
+                        n.celery_task_id = None
+                        n.save(update_fields=['status', 'last_error', 'celery_task_id'])
+                except Exception as e:
+                    logger.exception("Failed to mark fallback notifications as failed for todo id=%s: %s",
+                                     getattr(todo, 'id', None), e)
         except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
             logger.exception("Failed to delete calendar event for old assignee for todo id=%s: %s",
                              getattr(todo, 'id', None), exc)
