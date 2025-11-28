@@ -155,13 +155,22 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
 
         raw_initial = getattr(self, 'initial_data', {}) or {}
         if 'reminders' in raw_initial:
-            creator_role = getattr(getattr(instance, 'creator', None), 'role', None)
+            creator = getattr(instance, 'creator', None)
+            creator_role = getattr(creator, 'role', None)
             is_assignee = getattr(user, 'id', None) == getattr(getattr(instance, 'assignee', None), 'id', None)
             reminders = get_user_reminders(user, raw_initial, validated_data.get('reminders'))
-            if is_assignee and creator_role == 'dean':
-                validated_data['assignee_reminders'] = reminders
-            else:
+
+            creator_id = getattr(creator, 'id', None)
+            assignee_id = getattr(getattr(instance, 'assignee', None), 'id', None)
+            if creator_id is not None and creator_id == assignee_id and is_assignee:
                 validated_data['reminders'] = reminders
+            else:
+                if is_assignee and creator_role == 'dean':
+                    validated_data['assignee_reminders'] = reminders
+                    if 'reminders' in validated_data:
+                        validated_data.pop('reminders', None)
+                else:
+                    validated_data['reminders'] = reminders
 
         new_assignee = validated_data.get('assignee', getattr(instance, 'assignee', None))
         if getattr(user, 'role', None) == 'dean':

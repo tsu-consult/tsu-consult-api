@@ -952,7 +952,8 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.todo.refresh_from_db()
         self.assertEqual(self.todo.status, "done")
-        self.assertEqual(self.todo.reminders, reminders)
+        # Так как задача создана деканом, редактирование reminders назначенным должно менять assignee_reminders
+        self.assertEqual(self.todo.assignee_reminders, reminders)
         mock_sync.assert_called_once()
 
     def test_update_as_assignee_forbidden_fields(self):
@@ -1154,3 +1155,62 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.todo.refresh_from_db()
         self.assertEqual(self.todo.assignee_reminders, TEACHER_DEFAULT_REMINDERS)
+
+    def test_dean_edit_changes_reminders_not_assignee_reminders(self):
+        self.todo.reminders = [{"method": "popup", "minutes": 20}]
+        self.todo.assignee_reminders = [{"method": "popup", "minutes": 7}]
+        self.todo.save()
+
+        self.client.force_authenticate(user=self.dean)
+        new_reminders = [{"method": "popup", "minutes": 30}]
+        data = {"reminders": new_reminders}
+
+        with patch("apps.todo_app.views.sync_calendars") as mock_sync:
+            response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.reminders, new_reminders)
+        self.assertEqual(self.todo.assignee_reminders, [{"method": "popup", "minutes": 7}])
+
+    def test_assignee_edit_changes_assignee_reminders_when_creator_is_dean(self):
+        self.assertEqual(self.todo.creator, self.dean)
+        self.todo.reminders = [{"method": "popup", "minutes": 20}]
+        self.todo.assignee_reminders = [{"method": "popup", "minutes": 7}]
+        self.todo.save()
+
+        self.client.force_authenticate(user=self.teacher)
+        new_reminders = [{"method": "popup", "minutes": 25}]
+        data = {"reminders": new_reminders}
+
+        with patch("apps.todo_app.views.sync_calendars") as mock_sync:
+            response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_reminders, new_reminders)
+        self.assertEqual(self.todo.reminders, [{"method": "popup", "minutes": 20}])
+
+    def test_creator_equals_assignee_edit_changes_only_creator_reminders(self):
+        teacher_self = User.objects.create_user(email="t_self@example.com", username="t_self", role="teacher")
+        todo_self = ToDo.objects.create(
+            title="Self task",
+            creator=teacher_self,
+            assignee=teacher_self,
+            deadline=timezone.now() + timedelta(days=1),
+            reminders=[{"method": "popup", "minutes": 10}],
+            assignee_reminders=[{"method": "popup", "minutes": 10}]
+        )
+        url_self = f"/todo/{todo_self.id}/"
+
+        self.client.force_authenticate(user=teacher_self)
+        new_reminders = [{"method": "popup", "minutes": 45}]
+        data = {"reminders": new_reminders}
+
+        with patch("apps.todo_app.views.sync_calendars") as mock_sync:
+            response = self.client.put(url_self, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        todo_self.refresh_from_db()
+        self.assertEqual(todo_self.reminders, new_reminders)
+        self.assertEqual(todo_self.assignee_reminders, [{"method": "popup", "minutes": 10}])

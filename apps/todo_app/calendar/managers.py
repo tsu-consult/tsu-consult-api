@@ -77,7 +77,8 @@ class CalendarSyncManager:
                 and getattr(self.todo.assignee, 'id', None) != getattr(self.todo.creator, 'id', None)):
             try:
                 assignee_manager = CalendarSyncManager(self.todo, self.todo.assignee)
-                assignee_manager._sync_calendar(getattr(self.todo, 'assignee_reminders', None), self.actor_user, False)
+                assignee_manager._sync_calendar(getattr(self.todo, 'assignee_reminders', None),
+                                                assignee_manager.actor_user, False)
             except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
                 logger.exception("Failed to sync calendar for assignee after creating/updating todo id=%s: %s",
                                  getattr(self.todo, 'id', None), exc)
