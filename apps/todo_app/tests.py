@@ -14,7 +14,7 @@ from core.exceptions import EventNotFound
 
 from apps.auth_app.models import User
 from apps.notification_app.models import Notification
-from apps.todo_app.config import MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH
+from apps.todo_app.config import MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH, TEACHER_DEFAULT_REMINDERS
 from apps.todo_app.fallback.services import FallbackReminderService
 from apps.todo_app.models import ToDo
 from apps.todo_app.utils import normalize_reminders_for_fallback
@@ -916,6 +916,15 @@ class ToDoUpdateTests(APITestCase):
         )
 
         self.url = f"/todo/{self.todo.id}/"
+        self._send_telegram_patcher = patch('apps.notification_app.services.send_telegram_notification')
+        self._mock_send_telegram = self._send_telegram_patcher.start()
+        self.addCleanup(self._send_telegram_patcher.stop)
+        self._mock_send_telegram.return_value = None
+
+        self.send_telegram_tasks_patcher = patch('apps.notification_app.tasks.send_telegram_notification')
+        self.mock_send_telegram_tasks = self.send_telegram_tasks_patcher.start()
+        self.addCleanup(self.send_telegram_tasks_patcher.stop)
+        self.mock_send_telegram_tasks.return_value = None
 
     def test_update_as_creator(self):
         self.client.force_authenticate(user=self.dean)
@@ -1100,7 +1109,8 @@ class ToDoUpdateTests(APITestCase):
         response = self.client.put(self.url, data, format="json")
 
         self.assertEqual(response.status_code, 400)
-        message = response.data.get('message', {}) if isinstance(getattr(response, 'data', None), dict) else response.data
+        message = response.data.get('message', {}) if isinstance(getattr(response, 'data', None),
+                                                                 dict) else response.data
         self.assertTrue(isinstance(message, dict) and 'status' in message)
 
     def test_only_assignee_can_change_status_other_teacher_forbidden(self):
@@ -1109,3 +1119,38 @@ class ToDoUpdateTests(APITestCase):
         response = self.client.put(self.url, data, format="json")
 
         self.assertIn(response.status_code, (403, 404))
+
+    def test_dean_edit_keeps_assignee_reminders_when_assignee_unchanged(self):
+        custom = [{"method": "popup", "minutes": 7}]
+        self.todo.assignee_reminders = custom
+        self.todo.save()
+
+        self.client.force_authenticate(user=self.dean)
+        data = {
+            "title": "Dean edit title"
+        }
+        with patch("apps.todo_app.views.sync_calendars") as mock_sync:
+            response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_reminders, custom)
+
+    def test_dean_edit_sets_assignee_reminders_to_default_on_assignee_change(self):
+        custom = [{"method": "popup", "minutes": 7}]
+        self.todo.assignee_reminders = custom
+        self.todo.save()
+
+        self.client.force_authenticate(user=self.dean)
+        data = {"assignee_id": self.other_teacher.id}
+
+        with patch("apps.todo_app.calendar.managers.GoogleCalendarService") as mock_calendar_manager_gc, \
+             patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc:
+            mock_calendar_manager_gc.return_value.service = False
+            mock_utils_gc.return_value.service = False
+
+            response = self.client.put(self.url, data, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_reminders, TEACHER_DEFAULT_REMINDERS)
