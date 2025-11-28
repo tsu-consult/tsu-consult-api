@@ -60,9 +60,10 @@ class ToDo(models.Model):
                 event_id = calendar_service.create_event(self, reminders=reminders)
 
             if event_id:
+                event_id_str = str(event_id)
                 id_field = "calendar_event_id" if for_creator else "assignee_calendar_event_id"
                 active_field = "calendar_event_active" if for_creator else "assignee_calendar_event_active"
-                setattr(self, id_field, event_id)
+                setattr(self, id_field, event_id_str)
                 setattr(self, active_field, True)
                 self.save(update_fields=[id_field, active_field])
                 return event_id

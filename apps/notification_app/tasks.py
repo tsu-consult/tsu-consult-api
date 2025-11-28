@@ -13,9 +13,9 @@ from requests.exceptions import RequestException
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from apps.notification_app.models import Notification
 from apps.notification_app.services import send_telegram_notification
+from apps.todo_app.fallback.services import FallbackReminderService
 from apps.todo_app.models import ToDo
-from apps.todo_app.services import FallbackReminderService
-from apps.todo_app.services import GoogleCalendarService
+from apps.todo_app.calendar.services import GoogleCalendarService
 from apps.todo_app.utils import normalize_reminders_for_fallback
 from apps.todo_app.utils import normalize_reminders_permissive
 from core.exceptions import GoogleCalendarAuthRequired, EventNotFound
