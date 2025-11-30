@@ -59,9 +59,8 @@ class FallbackReminderService:
             return
 
         logger.debug(
-            "schedule_fallback_reminders called for todo %s, target_user=%s",
-            getattr(todo, "id", None),
-            getattr(target_user, "id", None) if target_user else None,
+            "schedule_fallback_reminders called with todo=%s target_user=%s reminders=%r",
+            getattr(todo, 'id', None), getattr(target_user, 'id', None) if target_user else None, reminders
         )
 
         now = timezone.now()

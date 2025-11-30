@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from celery import current_app
 from celery.exceptions import CeleryError
+from django.utils import timezone
 from django.db import DatabaseError
 from googleapiclient.errors import HttpError
 from rest_framework.exceptions import ValidationError
@@ -148,7 +149,7 @@ def normalize_reminders_for_fallback(reminders: Optional[List[Dict[str, Any]]],
     return out
 
 
-def _create_notification_safe(user: User, title: str, message: str, note_context: str):
+def create_notification_safe(user: User, title: str, message: str, note_context: str):
     try:
         Notification.objects.create(
             user=user,
@@ -161,7 +162,7 @@ def _create_notification_safe(user: User, title: str, message: str, note_context
                          getattr(user, 'id', None), exc)
 
 
-def _get_todo(request: Any, todo_id: int):
+def get_todo(request: Any, todo_id: int):
     try:
         tid = int(todo_id)
     except (ValueError, TypeError):
@@ -177,12 +178,12 @@ def _get_todo(request: Any, todo_id: int):
     return todo, None
 
 
-def _notify_new_assignee_and_cleanup_old(todo: ToDo, old_assignee: Optional[User]):
+def notify_new_assignee_and_cleanup_old(todo: ToDo, old_assignee: Optional[User]):
     new_assignee = getattr(todo, 'assignee', None)
 
     if (new_assignee and
             (old_assignee is None or getattr(old_assignee, 'id', None) != getattr(new_assignee, 'id', None))):
-        _create_notification_safe(
+        create_notification_safe(
             new_assignee,
             "Вас назначили на задачу",
             f'Вам назначена задача: "{todo.title}".\n\nЧтобы просмотреть детали, перейдите в раздел "📝 Мои задачи".',
@@ -217,3 +218,33 @@ def _notify_new_assignee_and_cleanup_old(todo: ToDo, old_assignee: Optional[User
         except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
             logger.exception("Failed to delete calendar event for old assignee for todo id=%s: %s",
                              getattr(todo, 'id', None), exc)
+
+
+def cancel_pending_notifications_for_user(todo: ToDo, user: User, reason: str = 'Reminders updated') -> None:
+    try:
+        logger.debug("cancel_pending_notifications_for_user called for todo=%s user=%s reason=%s",
+                     getattr(todo, 'id', None), getattr(user, 'id', None), reason)
+        now = timezone.now()
+        pending_qs = Notification.objects.filter(user=user, todo=todo, status=Notification.Status.PENDING)
+        pending_qs = pending_qs.filter(scheduled_for__isnull=False, scheduled_for__gt=now)
+        for n in pending_qs:
+            logger.debug("Cancelling notification id=%s scheduled_for=%s celery_id=%s",
+                         getattr(n, 'id', None), getattr(n, 'scheduled_for', None), getattr(n, 'celery_task_id', None))
+            try:
+                if n.celery_task_id:
+                    try:
+                        current_app.control.revoke(n.celery_task_id, terminate=False)
+                    except Exception as e:
+                        logger.warning("Failed to revoke celery task %s for notification %s: %s",
+                                       n.celery_task_id, n.id, e)
+            except (CeleryError, RuntimeError) as e:
+                logger.warning("Failed to revoke celery task %s for notification %s: %s",
+                               n.celery_task_id, n.id, e)
+
+            n.status = Notification.Status.FAILED
+            n.last_error = f"{reason}."
+            n.celery_task_id = None
+            n.save(update_fields=['status', 'last_error', 'celery_task_id'])
+    except Exception as e:
+        logger.exception("Failed to cancel pending notifications for todo id=%s user=%s: %s",
+                         getattr(todo, 'id', None), getattr(user, 'id', None), e)

@@ -1,6 +1,8 @@
 import logging
 
+from django.db import DatabaseError
 from django.db.models import Q
+from celery.exceptions import CeleryError
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework.permissions import IsAuthenticated
@@ -12,7 +14,7 @@ from apps.todo_app.calendar.managers import sync_calendars
 from apps.todo_app.models import ToDo
 from apps.todo_app.serializers import ToDoRequestSerializer, ToDoResponseSerializer, PaginatedToDosSerializer, \
     ToDoListResponseSerializer
-from apps.todo_app.utils import _get_todo
+from apps.todo_app.utils import get_todo, cancel_pending_notifications_for_user
 from core.mixins import ErrorResponseMixin
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
@@ -102,7 +104,7 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         },
     )
     def get(self, request, todo_id):
-        todo, err = _get_todo(request, todo_id)
+        todo, err = get_todo(request, todo_id)
         if err:
             return err
 
@@ -127,7 +129,7 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         },
     )
     def put(self, request, todo_id):
-        todo, err = _get_todo(request, todo_id)
+        todo, err = get_todo(request, todo_id)
         if err:
             return err
 
@@ -140,6 +142,14 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
 
         old_assignee = todo.assignee
         todo = serializer.save()
+
+        raw_request = (getattr(request, 'data', {}) or {})
+        if 'reminders' in raw_request and raw_request.get('reminders') is not None:
+            try:
+                cancel_pending_notifications_for_user(todo, request.user, reason='Reminders updated via PUT')
+            except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
+                logger.exception("Failed to cancel pending notifications during update for todo id=%s: %s",
+                                 getattr(todo, 'id', None), exc)
 
         sync_calendars(todo, request.user, old_assignee)
 

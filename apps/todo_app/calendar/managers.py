@@ -9,7 +9,7 @@ from apps.todo_app.fallback.services import FallbackReminderService
 from apps.todo_app.models import ToDo
 from apps.todo_app.calendar.services import GoogleCalendarService
 from core.exceptions import GoogleCalendarAuthRequired
-from apps.todo_app.utils import _create_notification_safe, _notify_new_assignee_and_cleanup_old
+from apps.todo_app.utils import create_notification_safe, notify_new_assignee_and_cleanup_old
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def sync_calendars(todo: ToDo, actor_user: User, old_assignee: Optional[User] = 
 
     if (notify_assignee_on_create and todo.assignee
             and getattr(todo.assignee, 'id', None) != getattr(actor_user, 'id', None)):
-        _create_notification_safe(
+        create_notification_safe(
             todo.assignee,
             "Новая задача",
             f'Вам назначена задача: "{todo.title}".\n\nЧтобы просмотреть детали, перейдите в раздел "📝 Мои задачи".',
@@ -117,4 +117,4 @@ def sync_calendars(todo: ToDo, actor_user: User, old_assignee: Optional[User] = 
         )
 
     if old_assignee is not None:
-        _notify_new_assignee_and_cleanup_old(todo, old_assignee)
+        notify_new_assignee_and_cleanup_old(todo, old_assignee)
