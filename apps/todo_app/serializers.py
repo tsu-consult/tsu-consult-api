@@ -119,15 +119,15 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
         attrs = self.validate_assignee_edit_permissions(attrs)
 
         raw_reminders = attrs.get("reminders", None)
-        if 'reminders' in raw_initial:
+        if 'reminders' in raw_initial and raw_initial.get('reminders') is None:
+            if 'reminders' in attrs:
+                attrs.pop('reminders', None)
+        elif 'reminders' in raw_initial and raw_initial.get('reminders') is not None:
             try:
                 normalized = normalize_reminders_permissive(raw_reminders)
             except ValidationError as exc:
                 raise ValidationError(exc.detail)
-        else:
-            normalized = None
-
-        attrs['reminders'] = normalized
+            attrs['reminders'] = normalized
 
         return attrs
 
@@ -154,7 +154,7 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
             validated_data['assignee'] = user
 
         raw_initial = getattr(self, 'initial_data', {}) or {}
-        if 'reminders' in raw_initial:
+        if 'reminders' in raw_initial and raw_initial.get('reminders') is not None:
             creator = getattr(instance, 'creator', None)
             creator_role = getattr(creator, 'role', None)
             is_assignee = getattr(user, 'id', None) == getattr(getattr(instance, 'assignee', None), 'id', None)

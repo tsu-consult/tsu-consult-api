@@ -248,3 +248,12 @@ def cancel_pending_notifications_for_user(todo: ToDo, user: User, reason: str = 
     except Exception as e:
         logger.exception("Failed to cancel pending notifications for todo id=%s user=%s: %s",
                          getattr(todo, 'id', None), getattr(user, 'id', None), e)
+
+
+def has_calendar_integration(user) -> bool:
+    try:
+        service = GoogleCalendarService(user)
+        return bool(getattr(service, 'service', None))
+    except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError) as exc:
+        logger.debug("has_calendar_integration: failed check for user=%s: %s", getattr(user, 'id', None), exc)
+        return False

@@ -73,6 +73,23 @@ class FallbackReminderService:
             if notify_at <= now:
                 continue
 
+            try:
+                exists_qs = Notification.objects.filter(
+                    user=target_user,
+                    todo=todo,
+                    scheduled_for=notify_at,
+                    status=Notification.Status.PENDING,
+                )
+                if exists_qs.exists():
+                    logger.debug(
+                        "Skipping scheduling because pending notification already exists for todo=%s user=%s at=%s",
+                        getattr(todo, 'id', None), getattr(target_user, 'id', None) if target_user else None, notify_at
+                    )
+                    continue
+            except Exception as e:
+                logger.warning("Failed to check existing notifications for todo=%s user=%s: %s",
+                               getattr(todo, 'id', None), getattr(target_user, 'id', None) if target_user else None, e)
+
             interval_str = self.humanize_minutes(minutes_int)
             n = Notification.objects.create(
                 user=target_user,
