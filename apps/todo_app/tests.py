@@ -18,6 +18,7 @@ from apps.todo_app.config import MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH, TEACH
 from apps.todo_app.fallback.services import FallbackReminderService
 from apps.todo_app.models import ToDo
 from apps.todo_app.utils import normalize_reminders_for_fallback
+from apps.todo_app.calendar import managers as calendar_managers
 
 
 class BaseTest(TestCase):
@@ -952,7 +953,6 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.todo.refresh_from_db()
         self.assertEqual(self.todo.status, "done")
-        # Так как задача создана деканом, редактирование reminders назначенным должно менять assignee_reminders
         self.assertEqual(self.todo.assignee_reminders, reminders)
         mock_sync.assert_called_once()
 
@@ -1001,7 +1001,7 @@ class ToDoUpdateTests(APITestCase):
         }
 
         with patch("apps.todo_app.views.sync_calendars") as mock_sync, \
-             patch("apps.todo_app.calendar.managers.GoogleCalendarService") as mock_calendar_service:
+                patch("apps.todo_app.calendar.managers.GoogleCalendarService") as mock_calendar_service:
             response = self.client.put(self.url, data, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -1065,8 +1065,8 @@ class ToDoUpdateTests(APITestCase):
         data = {"assignee_id": self.other_teacher.id}
 
         with patch("apps.todo_app.calendar.managers.GoogleCalendarService") as mock_calendar_manager_gc, \
-             patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc, \
-             patch('celery.current_app.control.revoke') as mock_revoke:
+                patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc, \
+                patch('celery.current_app.control.revoke') as mock_revoke:
             mock_calendar_manager_gc.return_value.service = False
 
             mock_utils_inst = mock_utils_gc.return_value
@@ -1089,7 +1089,7 @@ class ToDoUpdateTests(APITestCase):
         }
 
         with patch("apps.todo_app.calendar.managers.GoogleCalendarService") as mock_calendar_manager_gc, \
-             patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc:
+                patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc:
             mock_calendar_manager_gc.return_value.service = False
 
             mock_utils_inst = mock_utils_gc.return_value
@@ -1146,7 +1146,7 @@ class ToDoUpdateTests(APITestCase):
         data = {"assignee_id": self.other_teacher.id}
 
         with patch("apps.todo_app.calendar.managers.GoogleCalendarService") as mock_calendar_manager_gc, \
-             patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc:
+                patch("apps.todo_app.utils.GoogleCalendarService") as mock_utils_gc:
             mock_calendar_manager_gc.return_value.service = False
             mock_utils_gc.return_value.service = False
 
@@ -1214,3 +1214,252 @@ class ToDoUpdateTests(APITestCase):
         todo_self.refresh_from_db()
         self.assertEqual(todo_self.reminders, new_reminders)
         self.assertEqual(todo_self.assignee_reminders, [{"method": "popup", "minutes": 10}])
+
+
+class ToDoRemindersDeadlineUpdateTests(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.creator = User.objects.create_user(email="upd_creator@example.com", username="upd_creator",
+                                                role="dean")
+        self.assignee = User.objects.create_user(email="upd_assignee@example.com", username="upd_assignee",
+                                                 role="teacher")
+
+        self.deadline = timezone.now() + timedelta(hours=4)
+        self.todo = ToDo.objects.create(
+            title="Update Rem/Deadline",
+            creator=self.creator,
+            assignee=self.assignee,
+            deadline=self.deadline,
+            reminders=[{"method": "popup", "minutes": 15}],
+            assignee_reminders=[{"method": "popup", "minutes": 60}],
+        )
+
+        self.gc_patcher = patch('apps.todo_app.calendar.managers.GoogleCalendarService')
+        self.mock_gc_class = self.gc_patcher.start()
+        self.addCleanup(self.gc_patcher.stop)
+        self.mock_gc = self.mock_gc_class.return_value
+        self.mock_gc.service = False
+
+        self.utils_gc_patcher = patch('apps.todo_app.utils.GoogleCalendarService')
+        self.mock_utils_gc_class = self.utils_gc_patcher.start()
+        self.addCleanup(self.utils_gc_patcher.stop)
+        self.mock_utils_gc = self.mock_utils_gc_class.return_value
+        self.mock_utils_gc.service = False
+
+        self.sync_patcher = patch('apps.todo_app.views.sync_calendars',
+                                  side_effect=calendar_managers.sync_calendars)
+        self.mock_sync = self.sync_patcher.start()
+        self.addCleanup(self.sync_patcher.stop)
+
+        self.revoke_patcher = patch('apps.todo_app.utils.current_app.control.revoke')
+        self.mock_revoke = self.revoke_patcher.start()
+        self.addCleanup(self.revoke_patcher.stop)
+        self.mock_revoke.return_value = None
+
+    def _create_notifications_for_reminders(self, user, minutes_list, status=Notification.Status.PENDING, shift=0):
+        notifs = []
+        for m in minutes_list:
+            sched = self.deadline - timedelta(minutes=m) + timedelta(seconds=shift)
+            n = Notification.objects.create(
+                user=user,
+                todo=self.todo,
+                title='Напоминание о задаче',
+                message='msg',
+                type=Notification.Type.TELEGRAM,
+                status=status,
+                scheduled_for=sched,
+                celery_task_id='task-%s' % m
+            )
+            notifs.append(n)
+        return notifs
+
+    def test_creator_equals_assignee_reminders_omitted_no_change(self):
+        teacher = User.objects.create_user(email='single@example.com', username='single', role='teacher')
+        todo = ToDo.objects.create(title='SelfOwned', creator=teacher, assignee=teacher,
+                                   deadline=timezone.now() + timedelta(hours=2),
+                                   reminders=[{"method": "popup", "minutes": 30}],
+                                   assignee_reminders=[{"method": "popup", "minutes": 30}])
+
+        url = f"/todo/{todo.id}/"
+        self.client.force_authenticate(user=teacher)
+        resp = self.client.put(url, {"title": "New title no rem"}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        todo.refresh_from_db()
+        self.assertEqual(todo.reminders, [{"method": "popup", "minutes": 30}])
+        self.assertEqual(todo.assignee_reminders, [{"method": "popup", "minutes": 30}])
+
+    def test_creator_equals_assignee_reminders_empty_list_cancels_pending_only(self):
+        self._create_notifications_for_reminders(self.creator, [15], status=Notification.Status.PENDING,
+                                                 shift=60)
+        self._create_notifications_for_reminders(self.creator, [30], status=Notification.Status.SENT,
+                                                 shift=-3600)
+
+        overdue_notif = Notification.objects.create(
+            user=self.creator,
+            todo=self.todo,
+            title='Напоминание о задаче',
+            message='msg',
+            type=Notification.Type.TELEGRAM,
+            status=Notification.Status.PENDING,
+            scheduled_for=timezone.now() - timedelta(days=1),
+            celery_task_id='task-45'
+        )
+
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=self.creator)
+
+        resp = self.client.put(url, {"reminders": []}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        failed = Notification.objects.filter(todo=self.todo, status=Notification.Status.FAILED)
+        sent = Notification.objects.filter(todo=self.todo, status=Notification.Status.SENT)
+
+        self.assertTrue(failed.exists())
+        self.assertTrue(sent.exists())
+
+        overdue_notif.refresh_from_db()
+        self.assertEqual(overdue_notif.status, Notification.Status.PENDING)
+
+    def test_creator_equals_assignee_reminders_new_list_replaces_and_creates_only_future(self):
+        self._create_notifications_for_reminders(self.creator, [15], status=Notification.Status.PENDING,
+                                                 shift=60)
+
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=self.creator)
+
+        new_reminders = [{"method": "popup", "minutes": 15}, {"method": "popup", "minutes": 60}]
+
+        resp = self.client.put(url, {"reminders": new_reminders}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.reminders, new_reminders)
+
+        minutes = normalize_reminders_for_fallback(new_reminders)
+        expected_times = [self.todo.deadline - timedelta(minutes=m) for m in minutes]
+
+        for et in expected_times:
+            found = Notification.objects.filter(todo=self.todo, status=Notification.Status.PENDING,
+                                                scheduled_for__gt=timezone.now())
+            exists_close = any(abs((n.scheduled_for - et).total_seconds()) < 5 for n in found)
+            self.assertTrue(exists_close, msg=f"No pending notification close to expected time {et}")
+
+    def test_creator_not_equal_assignee_reminders_omitted_no_change_for_either(self):
+        url = f"/todo/{self.todo.id}/"
+
+        self.client.force_authenticate(user=self.assignee)
+        resp = self.client.put(url, {"title": "Assignee edit no rem"}, format='json')
+
+        self.assertEqual(resp.status_code, 400)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.reminders, [{"method": "popup", "minutes": 15}])
+        self.assertEqual(self.todo.assignee_reminders, [{"method": "popup", "minutes": 60}])
+
+    def test_creator_not_equal_assignee_reminders_empty_list_cancels_only_updater(self):
+        self._create_notifications_for_reminders(self.assignee, [60], status=Notification.Status.PENDING,
+                                                 shift=60)
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=self.assignee)
+
+        resp = self.client.put(url, {"reminders": []}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_reminders, [])
+        self.assertEqual(self.todo.reminders, [{"method": "popup", "minutes": 15}])
+
+        failed = Notification.objects.filter(todo=self.todo, user=self.assignee, status=Notification.Status.FAILED)
+        self.assertTrue(failed.exists())
+
+    def test_creator_not_equal_assignee_reminders_new_list_replaces_only_updater_and_creates_future_only(self):
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=self.assignee)
+
+        new_assignee_reminders = [{"method": "popup", "minutes": 5}, {"method": "popup", "minutes": 300}]
+
+        resp = self.client.put(url, {"reminders": new_assignee_reminders}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_reminders, new_assignee_reminders)
+
+        notifs = Notification.objects.filter(todo=self.todo, user=self.assignee, status=Notification.Status.PENDING)
+        for n in notifs:
+            self.assertGreater(n.scheduled_for, timezone.now())
+
+    def test_deadline_change_without_reminders_creator_equals_assignee_recalculates_when_no_integration(self):
+        self._create_notifications_for_reminders(self.creator, [15, 60], status=Notification.Status.PENDING,
+                                                 shift=60)
+
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=self.creator)
+
+        new_deadline = timezone.now() + timedelta(hours=1)
+
+        resp = self.client.put(url, {"deadline": new_deadline.isoformat()}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertTrue(Notification.objects.filter(todo=self.todo, status=Notification.Status.FAILED).exists())
+        new_pending = Notification.objects.filter(todo=self.todo, status=Notification.Status.PENDING,
+                                                  scheduled_for__gt=timezone.now())
+        self.assertTrue(new_pending.exists())
+
+    def test_deadline_change_with_integration_updates_calendar_event(self):
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=self.creator)
+
+        new_deadline = timezone.now() + timedelta(hours=1)
+
+        self.mock_gc.service = True
+        self.mock_gc.update_event = Mock()
+
+        resp = self.client.put(url, {"deadline": new_deadline.isoformat()}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.mock_gc.update_event.assert_called()
+        self.mock_gc.service = False
+
+    def test_deadline_change_creator_not_equal_assignee_recalculates_for_both_where_applicable(self):
+        self._create_notifications_for_reminders(self.creator, [15], status=Notification.Status.PENDING,
+                                                 shift=60)
+        self._create_notifications_for_reminders(self.assignee, [60], status=Notification.Status.PENDING,
+                                                 shift=60)
+
+        url = f"/todo/{self.todo.id}/"
+
+        self.client.force_authenticate(user=self.creator)
+
+        new_deadline = timezone.now() + timedelta(hours=2)
+
+        resp = self.client.put(url, {"deadline": new_deadline.isoformat()}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(Notification.objects.filter(todo=self.todo, status=Notification.Status.FAILED,
+                                                    user=self.creator).exists())
+        self.assertTrue(Notification.objects.filter(todo=self.todo, status=Notification.Status.FAILED,
+                                                    user=self.assignee).exists())
+        self.assertTrue(Notification.objects.filter(todo=self.todo, status=Notification.Status.PENDING,
+                                                    user=self.creator).exists())
+        self.assertTrue(Notification.objects.filter(todo=self.todo, status=Notification.Status.PENDING,
+                                                    user=self.assignee).exists())
+
+    def test_deadline_change_with_reminders_empty_list_cancels_only_updater_when_not_same_user(self):
+        url = f"/todo/{self.todo.id}/"
+
+        self.client.force_authenticate(user=self.creator)
+        self._create_notifications_for_reminders(self.creator, [15], status=Notification.Status.PENDING,
+                                                 shift=60)
+        self._create_notifications_for_reminders(self.assignee, [60], status=Notification.Status.PENDING,
+                                                 shift=60)
+
+        resp = self.client.put(url, {"deadline": (timezone.now() + timedelta(hours=6)).isoformat(),
+                                     "reminders": []}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.reminders, [])
+        self.assertTrue(
+            Notification.objects.filter(todo=self.todo, user=self.creator, status=Notification.Status.FAILED).exists())
+        self.assertTrue(
+            Notification.objects.filter(todo=self.todo, user=self.assignee, status=Notification.Status.FAILED).exists())
