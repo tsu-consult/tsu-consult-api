@@ -220,13 +220,18 @@ def notify_new_assignee_and_cleanup_old(todo: ToDo, old_assignee: Optional[User]
                              getattr(todo, 'id', None), exc)
 
 
-def cancel_pending_notifications_for_user(todo: ToDo, user: User, reason: str = 'Reminders updated') -> None:
+def cancel_pending_notifications_for_user(todo: ToDo, user: User, reason: str = 'Reminders updated',
+                                          only_deadline: bool = True) -> None:
     try:
-        logger.debug("cancel_pending_notifications_for_user called for todo=%s user=%s reason=%s",
-                     getattr(todo, 'id', None), getattr(user, 'id', None), reason)
+        logger.debug("cancel_pending_notifications_for_user called for todo=%s user=%s reason=%s only_deadline=%s",
+                     getattr(todo, 'id', None), getattr(user, 'id', None), reason, only_deadline)
         now = timezone.now()
         pending_qs = Notification.objects.filter(user=user, todo=todo, status=Notification.Status.PENDING)
         pending_qs = pending_qs.filter(scheduled_for__isnull=False, scheduled_for__gt=now)
+
+        if only_deadline:
+            pending_qs = pending_qs.filter(title__iexact="Напоминание о задаче")
+
         for n in pending_qs:
             logger.debug("Cancelling notification id=%s scheduled_for=%s celery_id=%s",
                          getattr(n, 'id', None), getattr(n, 'scheduled_for', None), getattr(n, 'celery_task_id', None))
