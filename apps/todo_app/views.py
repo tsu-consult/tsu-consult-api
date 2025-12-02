@@ -21,6 +21,15 @@ from core.serializers import ErrorResponseSerializer
 
 logger = logging.getLogger(__name__)
 
+TODO_UPDATE_RESPONSES = {
+    200: openapi.Response(description="Задача обновлена", schema=ToDoResponseSerializer),
+    400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
+    401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+    403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+    404: openapi.Response(description="Не найдено", schema=ErrorResponseSerializer),
+    500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+}
+
 
 class ToDoCreateView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsActive, IsTeacherOrDean]
@@ -119,14 +128,7 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         operation_summary="Обновление задачи",
         operation_description="Редактирование задачи доступно только создателю или назначенному преподавателю.",
         request_body=ToDoRequestSerializer,
-        responses={
-            200: openapi.Response(description="Задача обновлена", schema=ToDoResponseSerializer),
-            400: openapi.Response(description="Некорректные данные", schema=ErrorResponseSerializer),
-            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
-            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
-            404: openapi.Response(description="Не найдено", schema=ErrorResponseSerializer),
-            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
-        },
+        responses=TODO_UPDATE_RESPONSES,
     )
     def put(self, request, todo_id):
         todo, err = get_todo(request, todo_id)
@@ -210,3 +212,14 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         sync_calendars(todo, request.user, old_assignee)
 
         return Response(ToDoResponseSerializer(todo).data, status=200)
+
+    @swagger_auto_schema(
+        tags=["To Do"],
+        operation_summary="Частичное обновление задачи",
+        operation_description=("Частичное редактирование задачи (PATCH) доступно только создателю или "
+                               "назначенному преподавателю."),
+        request_body=ToDoRequestSerializer,
+        responses=TODO_UPDATE_RESPONSES,
+    )
+    def patch(self, request, todo_id):
+        return self.put(request, todo_id)
