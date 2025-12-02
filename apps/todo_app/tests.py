@@ -984,6 +984,32 @@ class ToDoUpdateTests(APITestCase):
         self.todo.refresh_from_db()
         self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
 
+    def test_dean_reassigns_same_assignee_keeps_state(self):
+        self.todo.assignee_reminders = [{'method': 'popup', 'minutes': 45}]
+        self.todo.assignee_calendar_event_id = 'keep-existing'
+        self.todo.assignee_calendar_event_active = True
+        self.todo.save(update_fields=['assignee_reminders', 'assignee_calendar_event_id',
+                                      'assignee_calendar_event_active'])
+
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.patch(self.url, {'assignee_id': self.teacher.id}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_id, self.teacher.id)
+        self.assertEqual(self.todo.assignee_reminders, [{'method': 'popup', 'minutes': 45}])
+        self.assertEqual(self.todo.assignee_calendar_event_id, 'keep-existing')
+        self.assertTrue(self.todo.assignee_calendar_event_active)
+
+    def test_teacher_cannot_update_assignee(self):
+        self.client.force_authenticate(user=self.teacher)
+        resp = self.client.patch(self.url, {'assignee_id': self.other_teacher.id}, format='json')
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Assignee may only edit reminders and status', str(resp.data))
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_id, self.teacher.id)
+
     def test_update_reminders(self):
         todo, new_reminders = self._patch_reminders_and_get(self.dean)
         self.assertTrue(isinstance(todo.reminders, list) and len(todo.reminders) > 0)
