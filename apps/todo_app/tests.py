@@ -1458,6 +1458,39 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(self.todo.title, original_title)
         self.assertEqual(self.todo.description, original_description)
 
+    def test_update_succeeds_when_calendar_sync_raises_http_error(self):
+        with patch('apps.todo_app.calendar.managers.CalendarSyncManager.sync_creator',
+                   side_effect=HttpError(Mock(), b'Calendar API error')) as mock_logger:
+            self.client.force_authenticate(user=self.dean)
+            new_title = "Updated Title Despite Calendar Error"
+            resp = self.client.patch(self.url, {'title': new_title}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.title, new_title)
+
+    def test_update_succeeds_when_calendar_sync_raises_runtime_error(self):
+        with patch('apps.todo_app.calendar.managers.CalendarSyncManager.sync_assignee',
+                   side_effect=RuntimeError('Unexpected calendar error')):
+            self.client.force_authenticate(user=self.teacher)
+            new_reminders = [{'method': 'popup', 'minutes': 30}]
+            resp = self.client.patch(self.url, {'reminders': new_reminders}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_reminders, new_reminders)
+
+    def test_update_succeeds_when_calendar_sync_raises_generic_exception(self):
+        with patch('apps.todo_app.calendar.managers.CalendarSyncManager.sync_creator',
+                   side_effect=Exception('Unknown error in sync_calendars')):
+            self.client.force_authenticate(user=self.dean)
+            new_desc = "Updated Description Despite Generic Error"
+            resp = self.client.patch(self.url, {'description': new_desc}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.description, new_desc)
+
 
 class ToDoRemindersDeadlineUpdateTests(BaseTest):
     def setUp(self):
