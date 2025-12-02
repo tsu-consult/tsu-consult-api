@@ -101,7 +101,8 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
         instance = getattr(self, "instance", None)
 
         is_create = instance is None
-        is_assignee_provided = "assignee" in raw_initial
+        assignee_keys = {"assignee", "assignee_id"}
+        is_assignee_provided = any(key in (raw_initial or {}) for key in assignee_keys)
 
         if getattr(user, 'role', None) == 'dean' and (is_assignee_provided or is_create) and assignee is None:
             raise serializers.ValidationError({'assignee_id': 'The dean must assign the task to a teacher.'})

@@ -1058,7 +1058,7 @@ class ToDoUpdateTests(APITestCase):
         resp = self._patch_assignee(self.teacher, self.other_teacher.id)
 
         self.assertEqual(resp.status_code, 400)
-        self.assertIn('Assignee may only edit reminders and status', str(resp.data))
+        self.assertIn('Teachers can only assign tasks to themselves', str(resp.data))
         self.assertEqual(self.todo.assignee_id, self.teacher.id)
 
     def test_update_reminders(self):
@@ -1100,6 +1100,13 @@ class ToDoUpdateTests(APITestCase):
         resp2 = self.client.patch(self.url, {'assignee_id': student.id}, format='json')
         self.assertEqual(resp2.status_code, 400)
         self.assertIn('assignee_id', str(resp2.data))
+
+    def test_dean_cannot_remove_assignee(self):
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.patch(self.url, {'assignee_id': None}, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_id, self.teacher.id)
 
     def test_invalid_reminders_on_update(self):
         self.client.force_authenticate(user=self.dean)
