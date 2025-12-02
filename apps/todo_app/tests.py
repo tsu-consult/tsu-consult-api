@@ -954,6 +954,12 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(resp.status_code, 200)
         return resp, new_deadline
 
+    def _patch_assignee(self, user, assignee_id):
+        self.client.force_authenticate(user=user)
+        resp = self.client.patch(self.url, {'assignee_id': assignee_id}, format='json')
+        self.todo.refresh_from_db()
+        return resp
+
     def test_update_title(self):
         self.client.force_authenticate(user=self.dean)
         new_title = "Updated Title"
@@ -978,10 +984,8 @@ class ToDoUpdateTests(APITestCase):
         self.assertLessEqual(delta, 2)
 
     def test_update_assignee(self):
-        self.client.force_authenticate(user=self.dean)
-        resp = self.client.patch(self.url, {'assignee_id': self.other_teacher.id}, format='json')
+        resp = self._patch_assignee(self.dean, self.other_teacher.id)
         self.assertEqual(resp.status_code, 200)
-        self.todo.refresh_from_db()
         self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
 
     def test_dean_reassigns_same_assignee_keeps_state(self):
@@ -992,22 +996,19 @@ class ToDoUpdateTests(APITestCase):
                                       'assignee_calendar_event_active'])
 
         self.client.force_authenticate(user=self.dean)
-        resp = self.client.patch(self.url, {'assignee_id': self.teacher.id}, format='json')
+        resp = self._patch_assignee(self.dean, self.teacher.id)
 
         self.assertEqual(resp.status_code, 200)
-        self.todo.refresh_from_db()
         self.assertEqual(self.todo.assignee_id, self.teacher.id)
         self.assertEqual(self.todo.assignee_reminders, [{'method': 'popup', 'minutes': 45}])
         self.assertEqual(self.todo.assignee_calendar_event_id, 'keep-existing')
         self.assertTrue(self.todo.assignee_calendar_event_active)
 
     def test_teacher_cannot_update_assignee(self):
-        self.client.force_authenticate(user=self.teacher)
-        resp = self.client.patch(self.url, {'assignee_id': self.other_teacher.id}, format='json')
+        resp = self._patch_assignee(self.teacher, self.other_teacher.id)
 
         self.assertEqual(resp.status_code, 400)
         self.assertIn('Assignee may only edit reminders and status', str(resp.data))
-        self.todo.refresh_from_db()
         self.assertEqual(self.todo.assignee_id, self.teacher.id)
 
     def test_update_reminders(self):
