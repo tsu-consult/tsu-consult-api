@@ -154,6 +154,9 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
             validated_data['assignee'] = user
 
         raw_initial = getattr(self, 'initial_data', {}) or {}
+        deadline_passed = getattr(instance, 'deadline', None) and getattr(instance, 'deadline') < timezone.now()
+        if deadline_passed and 'reminders' in raw_initial:
+            raise serializers.ValidationError({'reminders': 'Cannot modify reminders for overdue tasks.'})
         if 'reminders' in raw_initial and raw_initial.get('reminders') is not None:
             creator = getattr(instance, 'creator', None)
             creator_role = getattr(creator, 'role', None)

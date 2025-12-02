@@ -1063,6 +1063,26 @@ class ToDoUpdateTests(APITestCase):
         self.assertTrue(isinstance(self.todo.reminders, list))
         self.assertFalse(any(r.get('minutes') == 20 for r in self.todo.reminders))
 
+    def test_cannot_update_reminders_when_deadline_overdue_for_creator(self):
+        self.todo.deadline = timezone.now() - timedelta(hours=1)
+        self.todo.save(update_fields=['deadline'])
+
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.patch(self.url, {'reminders': [{'method': 'popup', 'minutes': 10}]}, format='json')
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('reminders', str(resp.data))
+
+    def test_cannot_update_reminders_when_deadline_overdue_for_assignee(self):
+        self.todo.deadline = timezone.now() - timedelta(hours=2)
+        self.todo.save(update_fields=['deadline'])
+
+        self.client.force_authenticate(user=self.teacher)
+        resp = self.client.patch(self.url, {'reminders': [{'method': 'popup', 'minutes': 25}]}, format='json')
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('reminders', str(resp.data))
+
     def test_creator_equals_assignee_updates_only_reminders(self):
         same_teacher = User.objects.create_user(email='same@example.com', username='same', role='teacher')
         todo = ToDo.objects.create(
