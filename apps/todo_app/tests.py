@@ -1491,6 +1491,105 @@ class ToDoUpdateTests(APITestCase):
         self.todo.refresh_from_db()
         self.assertEqual(self.todo.description, new_desc)
 
+    def test_sequential_updates_by_creator_and_assignee_no_conflicts(self):
+        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+            self.client.force_authenticate(user=self.dean)
+            resp1 = self.client.patch(self.url, {'title': 'New Title by Creator'}, format='json')
+            self.assertEqual(resp1.status_code, 200)
+
+            self.client.force_authenticate(user=self.teacher)
+            resp2 = self.client.patch(self.url, {'status': ToDo.Status.DONE}, format='json')
+            self.assertEqual(resp2.status_code, 200)
+
+            self.assertEqual(mock_sync.call_count, 2)
+
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.title, 'New Title by Creator')
+        self.assertEqual(self.todo.status, ToDo.Status.DONE)
+
+    def test_multiple_sequential_updates_sync_called_correct_number_of_times(self):
+        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+            self.client.force_authenticate(user=self.dean)
+            resp1 = self.client.patch(self.url, {'title': 'First Update'}, format='json')
+            self.assertEqual(resp1.status_code, 200)
+
+            resp2 = self.client.patch(self.url, {'description': 'Second Update'}, format='json')
+            self.assertEqual(resp2.status_code, 200)
+
+            self.client.force_authenticate(user=self.teacher)
+            resp3 = self.client.patch(self.url, {'reminders': [{'method': 'popup', 'minutes': 45}]}, format='json')
+            self.assertEqual(resp3.status_code, 200)
+
+            resp4 = self.client.patch(self.url, {'status': ToDo.Status.DONE}, format='json')
+            self.assertEqual(resp4.status_code, 200)
+
+            self.assertEqual(mock_sync.call_count, 4)
+
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.title, 'First Update')
+        self.assertEqual(self.todo.description, 'Second Update')
+        self.assertEqual(self.todo.assignee_reminders, [{'method': 'popup', 'minutes': 45}])
+        self.assertEqual(self.todo.status, ToDo.Status.DONE)
+
+    def test_concurrent_field_updates_no_data_loss(self):
+        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+            self.client.force_authenticate(user=self.dean)
+            resp1 = self.client.patch(self.url, {
+                'title': 'Updated by Dean',
+                'description': 'Description by Dean'
+            }, format='json')
+            self.assertEqual(resp1.status_code, 200)
+
+            self.client.force_authenticate(user=self.teacher)
+            new_reminders = [{'method': 'popup', 'minutes': 60}]
+            resp2 = self.client.patch(self.url, {'reminders': new_reminders}, format='json')
+            self.assertEqual(resp2.status_code, 200)
+
+            self.assertEqual(mock_sync.call_count, 2)
+
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.title, 'Updated by Dean')
+        self.assertEqual(self.todo.description, 'Description by Dean')
+        self.assertEqual(self.todo.assignee_reminders, new_reminders)
+        self.assertEqual(self.todo.reminders, [{"method": "popup", "minutes": 5}])
+
+    def test_sync_calendars_called_with_correct_parameters_on_sequential_updates(self):
+        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+            self.client.force_authenticate(user=self.dean)
+            resp1 = self.client.patch(self.url, {'title': 'Updated by Dean'}, format='json')
+            self.assertEqual(resp1.status_code, 200)
+
+            self.assertEqual(mock_sync.call_count, 1)
+            first_call = mock_sync.call_args_list[0]
+            self.assertEqual(first_call[0][0].id, self.todo.id)
+            self.assertEqual(first_call[0][1].id, self.dean.id)
+            self.assertEqual(first_call[0][2].id, self.teacher.id)
+
+            self.client.force_authenticate(user=self.teacher)
+            resp2 = self.client.patch(self.url, {'reminders': [{'method': 'popup', 'minutes': 30}]}, format='json')
+            self.assertEqual(resp2.status_code, 200)
+
+            self.assertEqual(mock_sync.call_count, 2)
+            second_call = mock_sync.call_args_list[1]
+            self.assertEqual(second_call[0][0].id, self.todo.id)
+            self.assertEqual(second_call[0][1].id, self.teacher.id)
+            self.assertEqual(second_call[0][2].id, self.teacher.id)
+
+    def test_sync_calendars_receives_old_assignee_when_assignee_changes(self):
+        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+            self.client.force_authenticate(user=self.dean)
+            resp = self.client.patch(self.url, {'assignee_id': self.other_teacher.id}, format='json')
+            self.assertEqual(resp.status_code, 200)
+
+            self.assertEqual(mock_sync.call_count, 1)
+            call = mock_sync.call_args_list[0]
+            self.assertEqual(call[0][0].id, self.todo.id)
+            self.assertEqual(call[0][1].id, self.dean.id)
+            self.assertEqual(call[0][2].id, self.teacher.id)
+
+            self.todo.refresh_from_db()
+            self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
+
 
 class ToDoRemindersDeadlineUpdateTests(BaseTest):
     def setUp(self):
