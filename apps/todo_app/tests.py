@@ -1491,6 +1491,11 @@ class ToDoUpdateTests(APITestCase):
         self.todo.refresh_from_db()
         self.assertEqual(self.todo.description, new_desc)
 
+    def _assert_sync_calendars_call_params(self, call, expected_todo, expected_actor, expected_old_assignee):
+        self.assertEqual(call[0][0].id, expected_todo.id)
+        self.assertEqual(call[0][1].id, expected_actor.id)
+        self.assertEqual(call[0][2].id, expected_old_assignee.id)
+
     def test_sequential_updates_by_creator_and_assignee_no_conflicts(self):
         with patch('apps.todo_app.views.sync_calendars') as mock_sync:
             self.client.force_authenticate(user=self.dean)
@@ -1561,9 +1566,7 @@ class ToDoUpdateTests(APITestCase):
 
             self.assertEqual(mock_sync.call_count, 1)
             first_call = mock_sync.call_args_list[0]
-            self.assertEqual(first_call[0][0].id, self.todo.id)
-            self.assertEqual(first_call[0][1].id, self.dean.id)
-            self.assertEqual(first_call[0][2].id, self.teacher.id)
+            self._assert_sync_calendars_call_params(first_call, self.todo, self.dean, self.teacher)
 
             self.client.force_authenticate(user=self.teacher)
             resp2 = self.client.patch(self.url, {'reminders': [{'method': 'popup', 'minutes': 30}]}, format='json')
@@ -1571,9 +1574,7 @@ class ToDoUpdateTests(APITestCase):
 
             self.assertEqual(mock_sync.call_count, 2)
             second_call = mock_sync.call_args_list[1]
-            self.assertEqual(second_call[0][0].id, self.todo.id)
-            self.assertEqual(second_call[0][1].id, self.teacher.id)
-            self.assertEqual(second_call[0][2].id, self.teacher.id)
+            self._assert_sync_calendars_call_params(second_call, self.todo, self.teacher, self.teacher)
 
     def test_sync_calendars_receives_old_assignee_when_assignee_changes(self):
         with patch('apps.todo_app.views.sync_calendars') as mock_sync:
@@ -1583,9 +1584,7 @@ class ToDoUpdateTests(APITestCase):
 
             self.assertEqual(mock_sync.call_count, 1)
             call = mock_sync.call_args_list[0]
-            self.assertEqual(call[0][0].id, self.todo.id)
-            self.assertEqual(call[0][1].id, self.dean.id)
-            self.assertEqual(call[0][2].id, self.teacher.id)
+            self._assert_sync_calendars_call_params(call, self.todo, self.dean, self.teacher)
 
             self.todo.refresh_from_db()
             self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
