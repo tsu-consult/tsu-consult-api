@@ -13,10 +13,10 @@ from rest_framework.test import APIClient, APITestCase
 from apps.auth_app.models import User
 from apps.notification_app.models import Notification
 from apps.todo_app.calendar import managers as calendar_managers
-from apps.todo_app.config import MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH
+from apps.todo_app.config import MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH, TEACHER_DEFAULT_REMINDERS
 from apps.todo_app.fallback.services import FallbackReminderService
 from apps.todo_app.models import ToDo
-from apps.todo_app.utils import normalize_reminders_for_fallback
+from apps.todo_app.utils import normalize_reminders_for_fallback, build_future_assignee_reminders
 
 
 class BaseTest(TestCase):
@@ -987,6 +987,56 @@ class ToDoUpdateTests(APITestCase):
         resp = self._patch_assignee(self.dean, self.other_teacher.id)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
+
+    def test_dean_reassigns_teacher_cleans_up_old_assignee_integrations(self):
+        self.todo.deadline = timezone.now() + timedelta(hours=2)
+        self.todo.save(update_fields=['deadline'])
+
+        with patch('apps.todo_app.utils.GoogleCalendarService') as mock_gc_cls, \
+             patch('apps.todo_app.utils.cancel_pending_notifications_for_user') as mock_cancel:
+            mock_gc = mock_gc_cls.return_value
+            mock_gc.service = True
+            mock_gc.delete_event = Mock()
+
+            resp = self._patch_assignee(self.dean, self.other_teacher.id)
+
+        self.assertEqual(resp.status_code, 200)
+        mock_gc_cls.assert_called_once_with(user=self.teacher)
+        mock_gc.delete_event.assert_called_once()
+        mock_cancel.assert_called_once()
+        cancel_args, cancel_kwargs = mock_cancel.call_args
+        self.assertEqual(cancel_args[1], self.teacher)
+        self.assertEqual(cancel_kwargs.get('reason'), 'Assignee changed by dean')
+
+    def test_dean_reassigns_teacher_creates_future_assignee_reminders(self):
+        future_deadline = timezone.now() + timedelta(hours=3)
+        self.todo.deadline = future_deadline
+        self.todo.save(update_fields=['deadline'])
+        expected_defaults = build_future_assignee_reminders(future_deadline, TEACHER_DEFAULT_REMINDERS)
+
+        resp = self._patch_assignee(self.dean, self.other_teacher.id)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
+        self.assertEqual(self.todo.assignee_reminders, expected_defaults)
+
+    def test_dean_reassigns_teacher_skips_defaults_when_deadline_past(self):
+        self.todo.deadline = timezone.now() - timedelta(hours=1)
+        self.todo.save(update_fields=['deadline'])
+
+        resp = self._patch_assignee(self.dean, self.other_teacher.id)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.todo.assignee_reminders, [])
+
+    def test_dean_reassigns_teacher_skips_defaults_when_notify_time_passed(self):
+        self.todo.deadline = timezone.now() + timedelta(minutes=5)
+        self.todo.save(update_fields=['deadline'])
+
+        resp = self._patch_assignee(self.dean, self.other_teacher.id)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.todo.assignee_reminders, [])
 
     def test_dean_reassigns_same_assignee_keeps_state(self):
         self.todo.assignee_reminders = [{'method': 'popup', 'minutes': 45}]
