@@ -28,6 +28,32 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
             reminders=[{'method': 'popup', 'minutes': 10}]
         )
 
+    @staticmethod
+    def _create_mock_service_with_patch_error(error_or_side_effect):
+        mock_service = Mock()
+        mock_events = Mock()
+        mock_patch = Mock()
+        mock_patch.execute = Mock(side_effect=error_or_side_effect)
+        mock_events.patch = Mock(return_value=mock_patch)
+        mock_service.events = Mock(return_value=mock_events)
+        return mock_service
+
+    @staticmethod
+    def _create_mock_service_with_success(return_value):
+        mock_service = Mock()
+        mock_events = Mock()
+        mock_patch = Mock()
+        mock_patch.execute = Mock(return_value=return_value)
+        mock_events.patch = Mock(return_value=mock_patch)
+        mock_service.events = Mock(return_value=mock_events)
+        return mock_service
+
+    def _setup_service_with_calendar(self, mock_service, calendar_id='test-calendar-id'):
+        service = GoogleCalendarService(self.user)
+        service.service = mock_service
+        service.calendar_id = calendar_id
+        return service
+
     def test_update_event_returns_false_when_todo_is_none(self):
         service = GoogleCalendarService(self.user)
         result = service.update_event(todo=None)
@@ -84,24 +110,15 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_ensure_creds.return_value = None
         mock_find_event.return_value = {'id': 'event-123', 'summary': 'Old Summary'}
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_execute = Mock(return_value={'id': 'event-123', 'summary': 'Updated Summary'})
-
-        mock_patch.execute = mock_execute
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_success({'id': 'event-123', 'summary': 'Updated Summary'})
+        service = self._setup_service_with_calendar(mock_service)
 
         reminders = [{'method': 'popup', 'minutes': 15}]
         result = service.update_event(self.todo, reminders)
 
         self.assertTrue(result)
         mock_find_event.assert_called_once_with(self.todo)
+        mock_events = mock_service.events.return_value
         mock_events.patch.assert_called_once()
 
         call_args = mock_events.patch.call_args
@@ -125,16 +142,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_response.status = 404
         http_error = HttpError(mock_response, b'Not Found')
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_patch.execute = Mock(side_effect=http_error)
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_patch_error(http_error)
+        service = self._setup_service_with_calendar(mock_service)
 
         with self.assertRaises(EventNotFound):
             service.update_event(self.todo)
@@ -151,16 +160,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_response.status = 401
         http_error = HttpError(mock_response, b'Unauthorized')
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_patch.execute = Mock(side_effect=http_error)
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_patch_error(http_error)
+        service = self._setup_service_with_calendar(mock_service)
 
         result = service.update_event(self.todo)
 
@@ -177,16 +178,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_response.status = 403
         http_error = HttpError(mock_response, b'Forbidden')
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_patch.execute = Mock(side_effect=http_error)
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_patch_error(http_error)
+        service = self._setup_service_with_calendar(mock_service)
 
         with patch.object(service, '_handle_refresh_error') as mock_handle:
             result = service.update_event(self.todo)
@@ -203,16 +196,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_response.status = 500
         http_error = HttpError(mock_response, b'Internal Server Error')
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_patch.execute = Mock(side_effect=http_error)
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_patch_error(http_error)
+        service = self._setup_service_with_calendar(mock_service)
 
         result = service.update_event(self.todo)
         self.assertFalse(result)
@@ -223,16 +208,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_ensure_creds.return_value = None
         mock_find_event.return_value = {'id': 'event-123'}
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_patch.execute = Mock(side_effect=RefreshError('Token expired'))
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_patch_error(RefreshError('Token expired'))
+        service = self._setup_service_with_calendar(mock_service)
 
         with patch.object(service, '_handle_refresh_error') as mock_handle:
             service.update_event(self.todo)
@@ -244,16 +221,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_ensure_creds.return_value = None
         mock_find_event.return_value = {'id': 'event-123'}
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_patch.execute = Mock(side_effect=ValueError('Invalid value'))
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_patch_error(ValueError('Invalid value'))
+        service = self._setup_service_with_calendar(mock_service)
 
         result = service.update_event(self.todo)
         self.assertFalse(result)
@@ -265,18 +234,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_ensure_creds.return_value = None
         mock_find_event.return_value = {'id': 'event-456'}
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_execute = Mock(return_value={'id': 'event-456'})
-
-        mock_patch.execute = mock_execute
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_success({'id': 'event-456'})
+        service = self._setup_service_with_calendar(mock_service)
 
         new_reminders = [
             {'method': 'popup', 'minutes': 30},
@@ -285,6 +244,7 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         result = service.update_event(self.todo, new_reminders)
 
         self.assertTrue(result)
+        mock_events = mock_service.events.return_value
         call_args = mock_events.patch.call_args
         body = call_args[1]['body']
         self.assertEqual(body['reminders']['overrides'], new_reminders)
@@ -296,18 +256,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_ensure_creds.return_value = None
         mock_find_event.return_value = {'id': 'event-789'}
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_execute = Mock(return_value={'id': 'event-789'})
-
-        mock_patch.execute = mock_execute
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
-        service = GoogleCalendarService(self.user)
-        service.service = mock_service
-        service.calendar_id = 'test-calendar-id'
+        mock_service = self._create_mock_service_with_success({'id': 'event-789'})
+        service = self._setup_service_with_calendar(mock_service)
 
         self.todo.title = 'Updated Task Title'
         self.todo.description = 'Updated Description'
@@ -319,11 +269,12 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         result = service.update_event(self.todo)
 
         self.assertTrue(result)
+        mock_events = mock_service.events.return_value
         call_args = mock_events.patch.call_args
         body = call_args[1]['body']
 
         self.assertIn('Updated Task Title', body['summary'])
-        self.assertIn('[Выполнено]', body['summary'])  # Статус DONE
+        self.assertIn('[Выполнено]', body['summary'])
         self.assertIn('Updated Description', body['description'])
         self.assertIn('dateTime', body['start'])
         self.assertIn('dateTime', body['end'])
@@ -349,15 +300,7 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
         mock_ensure_creds.return_value = None
         mock_find_event.return_value = {'id': 'event-999'}
 
-        mock_service = Mock()
-        mock_events = Mock()
-        mock_patch = Mock()
-        mock_execute = Mock(return_value={'id': 'event-999'})
-
-        mock_patch.execute = mock_execute
-        mock_events.patch = Mock(return_value=mock_patch)
-        mock_service.events = Mock(return_value=mock_events)
-
+        mock_service = self._create_mock_service_with_success({'id': 'event-999'})
         service = GoogleCalendarService(self.user)
         service.service = mock_service
         service.calendar_id = None
@@ -372,4 +315,3 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
             self.assertTrue(result)
             mock_get_calendar.assert_called_once()
             self.assertEqual(service.calendar_id, 'new-calendar-id')
-
