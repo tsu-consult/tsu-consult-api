@@ -1079,6 +1079,44 @@ class ToDoUpdateTests(APITestCase):
         self.assertTrue(any(r.get('minutes') == 30 for r in todo.reminders))
         self.assertEqual(todo.assignee_reminders, [])
 
+    def test_deadline_change_cancels_only_deadline_reminders(self):
+        now = timezone.now()
+        future1 = now + timedelta(hours=3)
+        future2 = now + timedelta(hours=4)
+
+        notif_deadline = Notification.objects.create(
+            user=self.teacher,
+            todo=self.todo,
+            title='Напоминание о задаче',
+            message='deadline reminder',
+            status=Notification.Status.PENDING,
+            scheduled_for=future1,
+        )
+
+        notif_other = Notification.objects.create(
+            user=self.teacher,
+            todo=self.todo,
+            title='Custom Reminder',
+            message='other reminder',
+            status=Notification.Status.PENDING,
+            scheduled_for=future2,
+        )
+
+        with patch('apps.todo_app.utils.has_calendar_integration', return_value=False):
+            self.client.force_authenticate(user=self.dean)
+            new_deadline = timezone.now() + timedelta(days=2)
+            resp = self.client.patch(self.url, {'deadline': new_deadline.isoformat()}, format='json')
+            self.assertEqual(resp.status_code, 200)
+
+        notif_deadline.refresh_from_db()
+        notif_other.refresh_from_db()
+
+        self.assertEqual(notif_deadline.status, Notification.Status.FAILED)
+        self.assertIsNone(notif_deadline.celery_task_id)
+        self.assertIn('Deadline changed', (notif_deadline.last_error or ''))
+
+        self.assertEqual(notif_other.status, Notification.Status.PENDING)
+
 
 class ToDoRemindersDeadlineUpdateTests(BaseTest):
     def setUp(self):
