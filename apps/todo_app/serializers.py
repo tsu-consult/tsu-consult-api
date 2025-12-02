@@ -6,7 +6,7 @@ from apps.auth_app.models import User
 from apps.todo_app.config import MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH, \
     MIN_DEADLINE_DELTA, TEACHER_DEFAULT_REMINDERS
 from apps.todo_app.models import ToDo
-from apps.todo_app.utils import get_user_reminders, normalize_reminders_permissive
+from apps.todo_app.utils import get_user_reminders, normalize_reminders_permissive, build_future_assignee_reminders
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -137,7 +137,11 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
             validated_data['assignee'] = user
 
         reminders = get_user_reminders(user, self.initial_data, validated_data.get('reminders'))
-        assignee_reminders = TEACHER_DEFAULT_REMINDERS if getattr(user, 'role', None) == 'dean' else []
+        if getattr(user, 'role', None) == 'dean':
+            assignee_reminders = build_future_assignee_reminders(validated_data.get('deadline'),
+                                                                 TEACHER_DEFAULT_REMINDERS)
+        else:
+            assignee_reminders = []
 
         validated_data['reminders'] = reminders
         validated_data['assignee_reminders'] = assignee_reminders
@@ -179,7 +183,9 @@ class ToDoRequestSerializer(serializers.ModelSerializer):
         if getattr(user, 'role', None) == 'dean':
             if ('assignee_reminders' not in validated_data) and (
                     old_assignee is None or getattr(old_assignee, 'id', None) != getattr(new_assignee, 'id', None)):
-                validated_data['assignee_reminders'] = TEACHER_DEFAULT_REMINDERS
+                future_defaults = build_future_assignee_reminders(getattr(instance, 'deadline', None),
+                                                                  TEACHER_DEFAULT_REMINDERS)
+                validated_data['assignee_reminders'] = future_defaults
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

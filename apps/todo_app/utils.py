@@ -1,5 +1,6 @@
 ﻿import logging
 from typing import Any, Dict, List, Optional
+from datetime import timedelta
 
 from celery import current_app
 from celery.exceptions import CeleryError
@@ -178,6 +179,35 @@ def get_todo(request: Any, todo_id: int):
     return todo, None
 
 
+def build_future_assignee_reminders(deadline, base_reminders=None):
+    if not deadline or not base_reminders:
+        return []
+
+    now = timezone.now()
+    if deadline <= now:
+        return []
+
+    valid: List[Dict[str, int]] = []
+    for reminder in base_reminders:
+        if not isinstance(reminder, dict):
+            continue
+
+        method = reminder.get('method')
+        minutes = reminder.get('minutes')
+        try:
+            minutes_int = int(minutes)
+        except (TypeError, ValueError):
+            continue
+
+        notify_at = deadline - timedelta(minutes=minutes_int)
+        if notify_at <= now:
+            continue
+
+        valid.append({'method': method, 'minutes': minutes_int})
+
+    return valid
+
+
 def notify_new_assignee_and_cleanup_old(todo: ToDo, old_assignee: Optional[User]):
     new_assignee = getattr(todo, 'assignee', None)
 
@@ -193,31 +223,17 @@ def notify_new_assignee_and_cleanup_old(todo: ToDo, old_assignee: Optional[User]
     if old_assignee and new_assignee and getattr(old_assignee, 'id', None) != getattr(new_assignee, 'id', None):
         try:
             old_assignee_service = GoogleCalendarService(user=old_assignee)
-            if getattr(old_assignee_service, 'service', None):
-                if getattr(old_assignee_service, 'delete_event', None):
-                    old_assignee_service.delete_event()
-            else:
-                try:
-                    pending = Notification.objects.filter(user=old_assignee, todo=todo,
-                                                          status=Notification.Status.PENDING)
-                    for n in pending:
-                        try:
-                            if n.celery_task_id:
-                                current_app.control.revoke(n.celery_task_id, terminate=False)
-                        except (CeleryError, RuntimeError) as e:
-                            logger.warning("Failed to revoke celery task %s for notification %s: %s",
-                                           n.celery_task_id, n.id, e)
-
-                        n.status = Notification.Status.FAILED
-                        n.last_error = 'Assignee changed and no calendar integration; fallback disabled.'
-                        n.celery_task_id = None
-                        n.save(update_fields=['status', 'last_error', 'celery_task_id'])
-                except Exception as e:
-                    logger.exception("Failed to mark fallback notifications as failed for todo id=%s: %s",
-                                     getattr(todo, 'id', None), e)
+            if getattr(old_assignee_service, 'service', None) and getattr(old_assignee_service, 'delete_event', None):
+                old_assignee_service.delete_event()
         except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
             logger.exception("Failed to delete calendar event for old assignee for todo id=%s: %s",
                              getattr(todo, 'id', None), exc)
+
+        try:
+            cancel_pending_notifications_for_user(todo, old_assignee, reason='Assignee changed by dean')
+        except Exception as exc:
+            logger.exception("Failed to cancel fallback notifications for old assignee todo id=%s user=%s: %s",
+                             getattr(todo, 'id', None), getattr(old_assignee, 'id', None), exc)
 
 
 def cancel_pending_notifications_for_user(todo: ToDo, user: User, reason: str = 'Reminders updated',
