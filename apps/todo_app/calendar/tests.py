@@ -315,3 +315,297 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
             self.assertTrue(result)
             mock_get_calendar.assert_called_once()
             self.assertEqual(service.calendar_id, 'new-calendar-id')
+
+
+class GoogleCalendarServiceDeleteEventTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email='test@example.com',
+            username='testuser',
+            role='teacher'
+        )
+        self.todo = ToDo.objects.create(
+            title='Test Task',
+            description='Test Description',
+            deadline=timezone.now() + timedelta(hours=2),
+            creator=self.user,
+            assignee=self.user,
+            reminders=[{'method': 'popup', 'minutes': 10}]
+        )
+
+    @staticmethod
+    def _create_mock_service_with_delete_success():
+        mock_service = Mock()
+        mock_events = Mock()
+        mock_delete = Mock()
+        mock_delete.execute = Mock(return_value={})
+        mock_events.delete = Mock(return_value=mock_delete)
+        mock_service.events = Mock(return_value=mock_events)
+        return mock_service
+
+    @staticmethod
+    def _create_mock_service_with_delete_error(error_or_side_effect):
+        mock_service = Mock()
+        mock_events = Mock()
+        mock_delete = Mock()
+        mock_delete.execute = Mock(side_effect=error_or_side_effect)
+        mock_events.delete = Mock(return_value=mock_delete)
+        mock_service.events = Mock(return_value=mock_events)
+        return mock_service
+
+    def _setup_service_with_calendar(self, mock_service, calendar_id='test-calendar-id'):
+        service = GoogleCalendarService(self.user)
+        service.service = mock_service
+        service.calendar_id = calendar_id
+        return service
+
+    def test_delete_event_returns_false_when_todo_is_none(self):
+        service = GoogleCalendarService(self.user)
+        result = service.delete_event(todo=None)
+        self.assertFalse(result)
+
+    def test_delete_event_returns_false_when_service_is_not_available(self):
+        service = GoogleCalendarService(self.user)
+        service.service = None
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._get_or_create_calendar')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_returns_false_when_calendar_id_unavailable(
+            self, mock_ensure_creds, mock_get_calendar):
+        mock_ensure_creds.return_value = None
+        mock_get_calendar.return_value = None
+
+        service = GoogleCalendarService(self.user)
+        service.service = Mock()
+        service.calendar_id = None
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
+        mock_get_calendar.assert_called_once()
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_returns_true_when_event_not_found(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = None
+
+        service = GoogleCalendarService(self.user)
+        service.service = Mock()
+        service.calendar_id = 'test-calendar-id'
+
+        result = service.delete_event(self.todo)
+        self.assertTrue(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_returns_false_when_event_has_no_id(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'summary': 'Event without ID'}
+
+        service = GoogleCalendarService(self.user)
+        service.service = Mock()
+        service.calendar_id = 'test-calendar-id'
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_successfully_deletes_existing_event(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'id': 'event-123'}
+
+        mock_service = self._create_mock_service_with_delete_success()
+        service = self._setup_service_with_calendar(mock_service)
+
+        result = service.delete_event(self.todo)
+
+        self.assertTrue(result)
+        mock_find_event.assert_called_once_with(self.todo)
+        mock_events = mock_service.events.return_value
+        mock_events.delete.assert_called_once_with(
+            calendarId='test-calendar-id',
+            eventId='event-123'
+        )
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_http_error_404_as_success(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'id': 'event-123'}
+
+        mock_response = Mock()
+        mock_response.status = 404
+        http_error = HttpError(mock_response, b'Not Found')
+
+        mock_service = self._create_mock_service_with_delete_error(http_error)
+        service = self._setup_service_with_calendar(mock_service)
+
+        result = service.delete_event(self.todo)
+        self.assertTrue(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._handle_refresh_error')
+    def test_delete_event_handles_http_error_401(
+            self, mock_handle_error, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'id': 'event-123'}
+
+        mock_response = Mock()
+        mock_response.status = 401
+        http_error = HttpError(mock_response, b'Unauthorized')
+
+        mock_service = self._create_mock_service_with_delete_error(http_error)
+        service = self._setup_service_with_calendar(mock_service)
+
+        result = service.delete_event(self.todo)
+
+        self.assertFalse(result)
+        mock_handle_error.assert_called_once()
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_http_error_403(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'id': 'event-123'}
+
+        mock_response = Mock()
+        mock_response.status = 403
+        http_error = HttpError(mock_response, b'Forbidden')
+
+        mock_service = self._create_mock_service_with_delete_error(http_error)
+        service = self._setup_service_with_calendar(mock_service)
+
+        with patch.object(service, '_handle_refresh_error') as mock_handle:
+            result = service.delete_event(self.todo)
+            self.assertFalse(result)
+            mock_handle.assert_called_once()
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_http_error_500(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'id': 'event-123'}
+
+        mock_response = Mock()
+        mock_response.status = 500
+        http_error = HttpError(mock_response, b'Internal Server Error')
+
+        mock_service = self._create_mock_service_with_delete_error(http_error)
+        service = self._setup_service_with_calendar(mock_service)
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_refresh_error(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'id': 'event-123'}
+
+        mock_service = self._create_mock_service_with_delete_error(RefreshError('Token expired'))
+        service = self._setup_service_with_calendar(mock_service)
+
+        with patch.object(service, '_handle_refresh_error') as mock_handle:
+            result = service.delete_event(self.todo)
+            self.assertFalse(result)
+            mock_handle.assert_called_once()
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_value_error(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'id': 'event-123'}
+
+        mock_service = self._create_mock_service_with_delete_error(ValueError('Invalid value'))
+        service = self._setup_service_with_calendar(mock_service)
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_find_event_exception(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.side_effect = HttpError(Mock(status=500), b'Server Error')
+
+        service = GoogleCalendarService(self.user)
+        service.service = Mock()
+        service.calendar_id = 'test-calendar-id'
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_creates_calendar_if_not_exists(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.return_value = {'id': 'event-999'}
+
+        mock_service = self._create_mock_service_with_delete_success()
+        service = GoogleCalendarService(self.user)
+        service.service = mock_service
+        service.calendar_id = None
+
+        def set_calendar_id():
+            service.calendar_id = 'new-calendar-id'
+            return 'new-calendar-id'
+
+        with patch.object(service, '_get_or_create_calendar', side_effect=set_calendar_id) as mock_get_calendar:
+            result = service.delete_event(self.todo)
+
+            self.assertTrue(result)
+            mock_get_calendar.assert_called_once()
+            self.assertEqual(service.calendar_id, 'new-calendar-id')
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_ensure_credentials_refresh_error(
+            self, mock_ensure_creds):
+        mock_ensure_creds.side_effect = RefreshError('Token expired')
+
+        service = GoogleCalendarService(self.user)
+        service.service = Mock()
+        service.calendar_id = 'test-calendar-id'
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_ensure_credentials_generic_exception(
+            self, mock_ensure_creds):
+        mock_ensure_creds.side_effect = Exception('Generic error')
+
+        service = GoogleCalendarService(self.user)
+        service.service = Mock()
+        service.calendar_id = 'test-calendar-id'
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
+
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService.find_event_for_todo')
+    @patch('apps.todo_app.calendar.services.GoogleCalendarService._ensure_credentials_valid')
+    def test_delete_event_handles_type_error_in_find_event(
+            self, mock_ensure_creds, mock_find_event):
+        mock_ensure_creds.return_value = None
+        mock_find_event.side_effect = TypeError('Type error')
+
+        service = GoogleCalendarService(self.user)
+        service.service = Mock()
+        service.calendar_id = 'test-calendar-id'
+
+        result = service.delete_event(self.todo)
+        self.assertFalse(result)
