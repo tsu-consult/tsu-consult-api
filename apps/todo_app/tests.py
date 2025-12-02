@@ -1178,6 +1178,14 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
             notifs.append(n)
         return notifs
 
+    def _put_as(self, user, payload):
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=user)
+        return self.client.put(url, payload, format='json')
+
+    def _put_deadline_none_as_creator(self):
+        return self._put_as(self.creator, {"deadline": None})
+
     def test_creator_equals_assignee_reminders_omitted_no_change(self):
         teacher = User.objects.create_user(email='single@example.com', username='single', role='teacher')
         todo = ToDo.objects.create(title='SelfOwned', creator=teacher, assignee=teacher,
@@ -1311,7 +1319,6 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
         self.assertTrue(new_pending.exists())
 
     def test_deadline_change_with_integration_updates_calendar_event(self):
-        url = f"/todo/{self.todo.id}/"
         self.client.force_authenticate(user=self.creator)
 
         new_deadline = timezone.now() + timedelta(hours=1)
@@ -1319,7 +1326,7 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
         self.mock_gc.service = True
         self.mock_gc.update_event = Mock()
 
-        resp = self.client.put(url, {"deadline": new_deadline.isoformat()}, format='json')
+        resp = self._put_as(self.creator, {"deadline": new_deadline.isoformat()})
 
         self.assertEqual(resp.status_code, 200)
         self.mock_gc.update_event.assert_called()
@@ -1331,13 +1338,9 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
         self._create_notifications_for_reminders(self.assignee, [60], status=Notification.Status.PENDING,
                                                  shift=60)
 
-        url = f"/todo/{self.todo.id}/"
-
-        self.client.force_authenticate(user=self.creator)
-
         new_deadline = timezone.now() + timedelta(hours=2)
 
-        resp = self.client.put(url, {"deadline": new_deadline.isoformat()}, format='json')
+        resp = self._put_as(self.creator, {"deadline": new_deadline.isoformat()})
 
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(Notification.objects.filter(todo=self.todo, status=Notification.Status.FAILED,
@@ -1350,16 +1353,16 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
                                                     user=self.assignee).exists())
 
     def test_deadline_change_with_reminders_empty_list_cancels_only_updater_when_not_same_user(self):
-        url = f"/todo/{self.todo.id}/"
-
-        self.client.force_authenticate(user=self.creator)
         self._create_notifications_for_reminders(self.creator, [15], status=Notification.Status.PENDING,
                                                  shift=60)
         self._create_notifications_for_reminders(self.assignee, [60], status=Notification.Status.PENDING,
                                                  shift=60)
 
-        resp = self.client.put(url, {"deadline": (timezone.now() + timedelta(hours=6)).isoformat(),
-                                     "reminders": []}, format='json')
+        payload = {
+            "deadline": (timezone.now() + timedelta(hours=6)).isoformat(),
+            "reminders": []
+        }
+        resp = self._put_as(self.creator, payload)
 
         self.assertEqual(resp.status_code, 200)
         self.todo.refresh_from_db()
@@ -1375,10 +1378,9 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
         self._create_notifications_for_reminders(self.assignee, [60], status=Notification.Status.PENDING,
                                                  shift=60)
 
-        url = f"/todo/{self.todo.id}/"
         self.client.force_authenticate(user=self.creator)
 
-        resp = self.client.put(url, {"deadline": None}, format='json')
+        resp = self._put_deadline_none_as_creator()
         self.assertEqual(resp.status_code, 200)
 
         failed_creator = Notification.objects.filter(todo=self.todo, user=self.creator,
@@ -1395,7 +1397,6 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
         self.assertTrue(self.mock_revoke.called)
 
     def test_deadline_removed_deletes_calendar_event_when_user_integrated(self):
-        url = f"/todo/{self.todo.id}/"
         self.client.force_authenticate(user=self.creator)
 
         with patch('apps.todo_app.views.has_calendar_integration', return_value=True), \
@@ -1404,7 +1405,7 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
             mock_service.service = True
             mock_service.delete_event = Mock()
 
-            resp = self.client.put(url, {"deadline": None}, format='json')
+            resp = self._put_deadline_none_as_creator()
 
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(mock_service.delete_event.called)
