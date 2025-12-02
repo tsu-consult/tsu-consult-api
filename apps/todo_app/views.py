@@ -1,7 +1,3 @@
-import logging
-
-from celery.exceptions import CeleryError
-from django.db import DatabaseError
 from django.db.models import Q
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -14,14 +10,11 @@ from apps.todo_app.calendar.managers import sync_calendars
 from apps.todo_app.models import ToDo
 from apps.todo_app.serializers import ToDoRequestSerializer, ToDoResponseSerializer, PaginatedToDosSerializer, \
     ToDoListResponseSerializer
-from apps.todo_app.utils import get_todo, cancel_pending_notifications_for_user, has_calendar_integration
+from apps.todo_app.services import ToDoUpdateService
+from apps.todo_app.utils import get_todo
 from core.mixins import ErrorResponseMixin
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
-from apps.todo_app.calendar.services import GoogleCalendarService
-from core.exceptions import GoogleCalendarAuthRequired
-
-logger = logging.getLogger(__name__)
 
 TODO_UPDATE_RESPONSES = {
     200: openapi.Response(description="Задача обновлена", schema=ToDoResponseSerializer),
@@ -101,17 +94,6 @@ class ToDoListView(ErrorResponseMixin, APIView):
 class ToDoDetailView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsActive, IsTeacherOrDean]
 
-    @staticmethod
-    def _get_potential_users(todo):
-        potential_users = []
-        creator_user = getattr(todo, 'creator', None)
-        assignee_user = getattr(todo, 'assignee', None)
-        if creator_user:
-            potential_users.append(creator_user)
-        if assignee_user and getattr(assignee_user, 'id', None) != getattr(creator_user, 'id', None):
-            potential_users.append(assignee_user)
-        return potential_users
-
     @swagger_auto_schema(
         tags=["To Do"],
         operation_summary="Детали задачи",
@@ -152,98 +134,22 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
             return self.format_error(request, 403, "Forbidden",
                                      "You do not have permission to perform this action.")
 
+        update_service = ToDoUpdateService(todo, request.user)
+        update_service.save_old_state()
+
         serializer = ToDoRequestSerializer(instance=todo, data=request.data, context={"request": request}, partial=True)
         serializer.is_valid(raise_exception=True)
-
-        old_assignee = todo.assignee
-        old_deadline = getattr(todo, 'deadline', None)
-        old_creator_reminders = getattr(todo, 'reminders', None)
-        old_assignee_reminders = getattr(todo, 'assignee_reminders', None)
-
         todo = serializer.save()
 
-        raw_request = (getattr(request, 'data', {}) or {})
-        if 'reminders' not in raw_request:
-            fields_to_update = []
-            if old_creator_reminders is not None and getattr(todo, 'reminders', None) is None:
-                todo.reminders = old_creator_reminders
-                fields_to_update.append('reminders')
-            if old_assignee_reminders is not None and getattr(todo, 'assignee_reminders', None) is None:
-                todo.assignee_reminders = old_assignee_reminders
-                fields_to_update.append('assignee_reminders')
-            if fields_to_update:
-                try:
-                    todo.save(update_fields=fields_to_update)
-                except Exception as exc:
-                    logger.exception("Failed to restore reminders fields for todo id=%s: %s",
-                                     getattr(todo, 'id', None), exc)
-
+        raw_request = getattr(request, 'data', {}) or {}
         reminders_in_request = 'reminders' in raw_request
-        reminders = reminders_in_request and raw_request.get('reminders') is not None
         reminders_value = raw_request.get('reminders') if reminders_in_request else None
 
-        deadline_changed = (old_deadline is not None and getattr(todo, 'deadline', None) is not None and old_deadline !=
-                            getattr(todo, 'deadline', None))
-
-        deadline_removed = (old_deadline is not None and getattr(todo, 'deadline', None) is None)
-
-        if deadline_removed:
-            potential_users = self._get_potential_users(todo)
-
-            for u in potential_users:
-                try:
-                    if has_calendar_integration(u):
-                        try:
-                            service = GoogleCalendarService(u)
-                            if getattr(service, 'service', None) and getattr(service, 'delete_event', None):
-                                service.delete_event()
-                        except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
-                            logger.exception("Failed to delete calendar event during deadline removal "
-                                             "for todo id=%s user=%s: %s", getattr(todo, 'id', None),
-                                             getattr(u, 'id', None), exc)
-                    else:
-                        try:
-                            cancel_pending_notifications_for_user(todo, u, reason='Deadline removed')
-                        except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
-                            logger.exception("Failed to cancel pending notifications during deadline "
-                                             "removal for todo id=%s user=%s: %s", getattr(todo, 'id', None),
-                                             getattr(u, 'id', None), exc)
-                except (GoogleCalendarAuthRequired, Exception) as exc:
-                    logger.exception("Error handling deadline removal for todo id=%s user=%s: %s",
-                                     getattr(todo, 'id', None), getattr(u, 'id', None), exc)
-
-        if deadline_changed:
-            potential_users = self._get_potential_users(todo)
-
-            for u in potential_users:
-                if has_calendar_integration(u):
-                    continue
-
-                try:
-                    cancel_pending_notifications_for_user(todo, u, reason='Deadline changed')
-                except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
-                    logger.exception("Failed to cancel pending notifications during deadline change for todo "
-                                     "id=%s user=%s: %s", getattr(todo, 'id', None), getattr(u, 'id', None), exc)
-
-        if reminders:
-            if isinstance(reminders_value, list) and len(reminders_value) == 0:
-                try:
-                    cancel_pending_notifications_for_user(todo, request.user, reason='Reminders cleared via PUT')
-                except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
-                    logger.exception("Failed to cancel pending notifications on explicit empty "
-                                     "reminders for todo id=%s: %s", getattr(todo, 'id', None), exc)
-            else:
-                try:
-                    cancel_pending_notifications_for_user(todo, request.user, reason='Reminders updated via PUT')
-                except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
-                    logger.exception("Failed to cancel pending notifications on reminders update for todo id=%s: %s",
-                                     getattr(todo, 'id', None), exc)
-
-                if not has_calendar_integration(request.user):
-                    logger.debug("Actor has no calendar integration; fallback scheduling delegated to "
-                                 "sync_calendars for todo id=%s", getattr(todo, 'id', None))
-
-        sync_calendars(todo, request.user, old_assignee)
+        update_service.restore_reminders_if_needed(reminders_in_request)
+        update_service.handle_deadline_removed()
+        update_service.handle_deadline_changed()
+        update_service.handle_reminders_update(reminders_value)
+        update_service.sync_calendars()
 
         return Response(ToDoResponseSerializer(todo).data, status=200)
 

@@ -1262,7 +1262,7 @@ class ToDoUpdateTests(APITestCase):
                                       'assignee_calendar_event_id', 'assignee_calendar_event_active'])
 
         with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
-                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+                patch('apps.todo_app.services.has_calendar_integration', return_value=True):
             mock_gc = mock_gc_cls.return_value
             mock_gc.service = True
             mock_gc.update_event = Mock(side_effect=EventNotFound("Event not found"))
@@ -1291,7 +1291,7 @@ class ToDoUpdateTests(APITestCase):
                                       'assignee_reminders'])
 
         with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
-                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+                patch('apps.todo_app.services.has_calendar_integration', return_value=True):
             mock_gc = mock_gc_cls.return_value
             mock_gc.service = True
             mock_gc.update_event = Mock(side_effect=EventNotFound("Event not found"))
@@ -1329,7 +1329,7 @@ class ToDoUpdateTests(APITestCase):
         update_event_side_effect.call_count = 0
 
         with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
-                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+                patch('apps.todo_app.services.has_calendar_integration', return_value=True):
             mock_gc = mock_gc_cls.return_value
             mock_gc.service = True
             mock_gc.update_event = Mock(side_effect=update_event_side_effect)
@@ -1497,7 +1497,7 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(call[0][2].id, expected_old_assignee.id)
 
     def test_sequential_updates_by_creator_and_assignee_no_conflicts(self):
-        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+        with patch('apps.todo_app.services.sync_calendars') as mock_sync:
             self.client.force_authenticate(user=self.dean)
             resp1 = self.client.patch(self.url, {'title': 'New Title by Creator'}, format='json')
             self.assertEqual(resp1.status_code, 200)
@@ -1513,7 +1513,7 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(self.todo.status, ToDo.Status.DONE)
 
     def test_multiple_sequential_updates_sync_called_correct_number_of_times(self):
-        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+        with patch('apps.todo_app.services.sync_calendars') as mock_sync:
             self.client.force_authenticate(user=self.dean)
             resp1 = self.client.patch(self.url, {'title': 'First Update'}, format='json')
             self.assertEqual(resp1.status_code, 200)
@@ -1537,7 +1537,7 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(self.todo.status, ToDo.Status.DONE)
 
     def test_concurrent_field_updates_no_data_loss(self):
-        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+        with patch('apps.todo_app.services.sync_calendars') as mock_sync:
             self.client.force_authenticate(user=self.dean)
             resp1 = self.client.patch(self.url, {
                 'title': 'Updated by Dean',
@@ -1559,7 +1559,7 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(self.todo.reminders, [{"method": "popup", "minutes": 5}])
 
     def test_sync_calendars_called_with_correct_parameters_on_sequential_updates(self):
-        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+        with patch('apps.todo_app.services.sync_calendars') as mock_sync:
             self.client.force_authenticate(user=self.dean)
             resp1 = self.client.patch(self.url, {'title': 'Updated by Dean'}, format='json')
             self.assertEqual(resp1.status_code, 200)
@@ -1577,7 +1577,7 @@ class ToDoUpdateTests(APITestCase):
             self._assert_sync_calendars_call_params(second_call, self.todo, self.teacher, self.teacher)
 
     def test_sync_calendars_receives_old_assignee_when_assignee_changes(self):
-        with patch('apps.todo_app.views.sync_calendars') as mock_sync:
+        with patch('apps.todo_app.services.sync_calendars') as mock_sync:
             self.client.force_authenticate(user=self.dean)
             resp = self.client.patch(self.url, {'assignee_id': self.other_teacher.id}, format='json')
             self.assertEqual(resp.status_code, 200)
@@ -1596,7 +1596,7 @@ class ToDoUpdateTests(APITestCase):
         self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active', 'reminders'])
 
         with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
-                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+                patch('apps.todo_app.services.has_calendar_integration', return_value=True):
             mock_gc = mock_gc_cls.return_value
             mock_gc.service = True
             mock_gc.update_event = Mock(return_value=True)
@@ -1621,7 +1621,7 @@ class ToDoUpdateTests(APITestCase):
                                       'assignee_reminders'])
 
         with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
-                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+                patch('apps.todo_app.services.has_calendar_integration', return_value=True):
             mock_gc = mock_gc_cls.return_value
             mock_gc.service = True
             mock_gc.update_event = Mock(return_value=True)
@@ -1650,7 +1650,7 @@ class ToDoUpdateTests(APITestCase):
                                       'assignee_reminders'])
 
         with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
-                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+                patch('apps.todo_app.services.has_calendar_integration', return_value=True):
             mock_gc = mock_gc_cls.return_value
             mock_gc.service = True
             mock_gc.update_event = Mock(return_value=True)
@@ -1676,7 +1676,7 @@ class ToDoUpdateTests(APITestCase):
         self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active', 'reminders'])
 
         with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
-                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+                patch('apps.todo_app.services.has_calendar_integration', return_value=True):
             mock_gc = mock_gc_cls.return_value
             mock_gc.service = True
             mock_gc.update_event = Mock(return_value=False)
@@ -1702,7 +1702,7 @@ class ToDoUpdateTests(APITestCase):
                                       'assignee_reminders'])
 
         with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
-                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+                patch('apps.todo_app.services.has_calendar_integration', return_value=True):
             mock_gc = mock_gc_cls.return_value
             mock_gc.service = True
             mock_gc.update_event = Mock(return_value=False)
@@ -1999,8 +1999,8 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
     def test_deadline_removed_deletes_calendar_event_when_user_integrated(self):
         self.client.force_authenticate(user=self.creator)
 
-        with patch('apps.todo_app.views.has_calendar_integration', return_value=True), \
-                patch('apps.todo_app.views.GoogleCalendarService') as mock_service_cls:
+        with patch('apps.todo_app.services.has_calendar_integration', return_value=True), \
+                patch('apps.todo_app.services.GoogleCalendarService') as mock_service_cls:
             mock_service = mock_service_cls.return_value
             mock_service.service = True
             mock_service.delete_event = Mock()
