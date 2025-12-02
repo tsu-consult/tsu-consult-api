@@ -424,5 +424,88 @@ class GoogleCalendarService:
             )
             return False
 
-    def delete_event(self):
-        return True
+    def delete_event(self, todo: ToDo) -> bool:
+        if not todo:
+            logger.warning("delete_event called with no todo")
+            return False
+
+        try:
+            self._ensure_credentials_valid()
+        except RefreshError:
+            logger.warning("RefreshError while ensuring credentials for delete_event")
+            return False
+        except Exception as exc:
+            logger.exception("Error ensuring credentials for delete_event: %s", exc)
+            return False
+
+        if not self.service:
+            logger.debug("No calendar service available for delete_event")
+            return False
+
+        if not self.calendar_id:
+            try:
+                self._get_or_create_calendar()
+            except HttpError as exc:
+                logger.exception(
+                    "Google API HttpError while getting/creating system calendar for user id=%s: %s",
+                    getattr(self.user, 'id', None), exc,
+                )
+                return False
+            if not self.calendar_id:
+                logger.warning("No calendar_id available for delete_event")
+                return False
+
+        try:
+            existing = self.find_event_for_todo(todo)
+        except (HttpError, RequestException, ValueError, TypeError) as exc:
+            logger.debug("find_event_for_todo raised while deleting event for todo %s: %s",
+                         getattr(todo, 'id', None), exc)
+            return False
+
+        if not existing:
+            logger.debug("No existing event found for todo id=%s", getattr(todo, 'id', None))
+            return True
+
+        event_id = existing.get('id')
+        if not event_id:
+            logger.warning("Event found but has no id for todo id=%s", getattr(todo, 'id', None))
+            return False
+
+        try:
+            self.service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()
+            logger.info("Successfully deleted calendar event %s for todo id=%s",
+                        event_id, getattr(todo, 'id', None))
+            return True
+        except RefreshError:
+            logger.warning("RefreshError while deleting event for todo id=%s", getattr(todo, 'id', None))
+            self._handle_refresh_error()
+            return False
+        except HttpError as exc:
+            status = None
+            try:
+                status_raw = getattr(exc.resp, 'status', None)
+                if status_raw is not None:
+                    status = int(status_raw)
+            except (AttributeError, TypeError, ValueError):
+                status = None
+
+            if status == 404:
+                logger.info("Event %s not found (already deleted?) for todo id=%s",
+                            event_id, getattr(todo, 'id', None))
+                return True
+            if status in (401, 403):
+                logger.warning("Auth error while deleting event for todo id=%s", getattr(todo, 'id', None))
+                self._handle_refresh_error()
+                return False
+
+            logger.exception(
+                "Google API HttpError while deleting event for user id=%s, todo id=%s: %s",
+                getattr(self.user, 'id', None), getattr(todo, 'id', None), exc,
+            )
+            return False
+        except (ValueError, TypeError) as exc:
+            logger.exception(
+                "Invalid data while deleting event for user id=%s, todo id=%s: %s",
+                getattr(self.user, 'id', None), getattr(todo, 'id', None), exc,
+            )
+            return False

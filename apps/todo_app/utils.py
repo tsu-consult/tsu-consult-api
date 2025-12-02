@@ -224,7 +224,7 @@ def notify_new_assignee_and_cleanup_old(todo: ToDo, old_assignee: Optional[User]
         try:
             old_assignee_service = GoogleCalendarService(user=old_assignee)
             if getattr(old_assignee_service, 'service', None) and getattr(old_assignee_service, 'delete_event', None):
-                old_assignee_service.delete_event()
+                old_assignee_service.delete_event(todo)
         except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
             logger.exception("Failed to delete calendar event for old assignee for todo id=%s: %s",
                              getattr(todo, 'id', None), exc)

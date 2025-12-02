@@ -1,4 +1,7 @@
+import logging
+
 from django.db.models import Q
+from django.utils import timezone
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework.permissions import IsAuthenticated
@@ -7,14 +10,17 @@ from rest_framework.views import APIView
 
 from apps.auth_app.permissions import IsActive, IsTeacherOrDean
 from apps.todo_app.calendar.managers import sync_calendars
+from apps.todo_app.calendar.services import GoogleCalendarService
 from apps.todo_app.models import ToDo
 from apps.todo_app.serializers import ToDoRequestSerializer, ToDoResponseSerializer, PaginatedToDosSerializer, \
     ToDoListResponseSerializer
 from apps.todo_app.services import ToDoUpdateService
-from apps.todo_app.utils import get_todo
+from apps.todo_app.utils import get_todo, cancel_pending_notifications_for_user
 from core.mixins import ErrorResponseMixin
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
+
+logger = logging.getLogger(__name__)
 
 TODO_UPDATE_RESPONSES = {
     200: openapi.Response(description="Задача обновлена", schema=ToDoResponseSerializer),
@@ -79,7 +85,10 @@ class ToDoListView(ErrorResponseMixin, APIView):
     def get(self, request):
         user = request.user
 
-        todos = ToDo.objects.filter(Q(creator=user) | Q(assignee=user)).order_by('-created_at')
+        todos = ToDo.objects.filter(
+            Q(creator=user) | Q(assignee=user),
+            deleted_at__isnull=True
+        ).order_by('-created_at')
 
         status_param = request.query_params.get('status')
         if status_param:
@@ -112,6 +121,10 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         if err:
             return err
 
+        if todo.is_deleted():
+            return self.format_error(request, 404, "Not Found",
+                                     "Task has been deleted.")
+
         if not todo.is_accessible_by(request.user):
             return self.format_error(request, 403, "Forbidden",
                                      "You do not have permission to perform this action.")
@@ -129,6 +142,10 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         todo, err = get_todo(request, todo_id)
         if err:
             return err
+
+        if todo.is_deleted():
+            return self.format_error(request, 404, "Not Found",
+                                     "Task has been deleted.")
 
         if not todo.is_accessible_by(request.user):
             return self.format_error(request, 403, "Forbidden",
@@ -163,3 +180,58 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
     )
     def patch(self, request, todo_id):
         return self.put(request, todo_id)
+
+    @swagger_auto_schema(
+        tags=["To Do"],
+        operation_summary="Удаление задачи",
+        operation_description="Удаление задачи доступно только создателю. Задача помечается как удалённая (tombstone), "
+                              "все pending уведомления для создателя и назначенного преподавателя отменяются.",
+        responses={
+            204: openapi.Response(description="Задача успешно удалена"),
+            401: openapi.Response(description="Неавторизован", schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Нет доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Не найдено", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def delete(self, request, todo_id):
+        todo, err = get_todo(request, todo_id)
+        if err:
+            return err
+
+        if todo.creator_id != request.user.id:
+            return self.format_error(request, 403, "Forbidden",
+                                     "Only the creator can delete this task.")
+
+        if todo.is_deleted():
+            return self.format_error(request, 404, "Not Found",
+                                     "Task has already been deleted.")
+
+        if todo.creator:
+            cancel_pending_notifications_for_user(todo, todo.creator, reason='Task deleted', only_deadline=False)
+
+        if todo.assignee:
+            cancel_pending_notifications_for_user(todo, todo.assignee, reason='Task deleted', only_deadline=False)
+
+        if todo.creator and (todo.calendar_event_id or todo.calendar_event_active):
+            try:
+                creator_service = GoogleCalendarService(todo.creator)
+                if creator_service.service:
+                    creator_service.delete_event(todo)
+            except Exception as exc:
+                logger.exception("Failed to delete calendar event for creator during task deletion "
+                                 "todo id=%s: %s", todo.id, exc)
+
+        if todo.assignee and (todo.assignee_calendar_event_id or todo.assignee_calendar_event_active):
+            try:
+                assignee_service = GoogleCalendarService(todo.assignee)
+                if assignee_service.service:
+                    assignee_service.delete_event(todo)
+            except Exception as exc:
+                logger.exception("Failed to delete calendar event for assignee during task deletion "
+                                 "todo id=%s: %s", todo.id, exc)
+
+        todo.deleted_at = timezone.now()
+        todo.save(update_fields=['deleted_at'])
+
+        return Response(status=204)

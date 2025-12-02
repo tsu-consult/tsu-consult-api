@@ -115,7 +115,7 @@ class ToDoUpdateService:
         try:
             service = GoogleCalendarService(user)
             if getattr(service, 'service', None) and getattr(service, 'delete_event', None):
-                service.delete_event()
+                service.delete_event(self.todo)
         except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
             logger.exception("Failed to delete calendar event during deadline removal "
                              "for todo id=%s user=%s: %s", getattr(self.todo, 'id', None),

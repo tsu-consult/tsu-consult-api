@@ -41,6 +41,7 @@ class ToDo(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"ToDo(id={self.id}, title={self.title}, creator={self.creator_id})"
@@ -49,6 +50,9 @@ class ToDo(models.Model):
         return user and user.is_authenticated and (
             self.creator_id == user.id or (self.assignee_id and self.assignee_id == user.id)
         )
+
+    def is_deleted(self):
+        return self.deleted_at is not None
 
     def create_calendar_event(self, calendar_service, reminders=None, for_creator=False):
         if not self.deadline:
