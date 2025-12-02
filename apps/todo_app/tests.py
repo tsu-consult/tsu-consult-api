@@ -1121,6 +1121,21 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn('status', str(resp.data))
 
+    def test_dean_cannot_change_status_when_not_assignee(self):
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.patch(self.url, {'status': ToDo.Status.DONE}, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Only assignee may change status', str(resp.data))
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.status, ToDo.Status.IN_PROGRESS)
+
+    def test_assignee_can_change_status(self):
+        self.client.force_authenticate(user=self.teacher)
+        resp = self.client.patch(self.url, {'status': ToDo.Status.DONE}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.status, ToDo.Status.DONE)
+
     def test_dean_updates_reminders_updates_creator_reminders(self):
         self.client.force_authenticate(user=self.dean)
         new_reminders = [{'method': 'popup', 'minutes': 10}]
