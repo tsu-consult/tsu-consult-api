@@ -1350,6 +1350,114 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(self.todo.assignee_calendar_event_id, 'existing-assignee-event-id')
         self.assertTrue(self.todo.assignee_calendar_event_active)
 
+    def test_put_accepts_full_object_with_all_fields(self):
+        new_deadline = timezone.now() + timedelta(days=3)
+        full_payload = {
+            'title': 'Fully Updated Title',
+            'description': 'Fully updated description',
+            'deadline': new_deadline.isoformat(),
+            'assignee_id': self.other_teacher.id,
+            'reminders': [{'method': 'popup', 'minutes': 20}]
+        }
+
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.put(self.url, full_payload, format='json')
+
+        self.assertEqual(resp.status_code, 200, f"Response error: {resp.data}")
+        self.todo.refresh_from_db()
+
+        self.assertEqual(self.todo.title, 'Fully Updated Title')
+        self.assertEqual(self.todo.description, 'Fully updated description')
+        self.assertIsNotNone(self.todo.deadline)
+        delta = abs((self.todo.deadline - new_deadline).total_seconds())
+        self.assertLessEqual(delta, 2)
+        self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
+        self.assertTrue(isinstance(self.todo.reminders, list))
+        self.assertTrue(any(r.get('minutes') == 20 for r in self.todo.reminders))
+
+    def test_put_accepts_partial_object_with_single_field(self):
+        original_description = self.todo.description
+        original_deadline = self.todo.deadline
+        original_assignee_id = self.todo.assignee_id
+        original_status = self.todo.status
+
+        partial_payload = {
+            'title': 'Partially Updated Title'
+        }
+
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.put(self.url, partial_payload, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+
+        self.assertEqual(self.todo.title, 'Partially Updated Title')
+        self.assertEqual(self.todo.description, original_description)
+        self.assertEqual(self.todo.deadline, original_deadline)
+        self.assertEqual(self.todo.assignee_id, original_assignee_id)
+        self.assertEqual(self.todo.status, original_status)
+
+    def test_put_accepts_partial_object_with_multiple_fields(self):
+        original_deadline = self.todo.deadline
+        original_assignee_id = self.todo.assignee_id
+        original_status = self.todo.status
+
+        partial_payload = {
+            'title': 'New Title',
+            'description': 'New Description'
+        }
+
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.put(self.url, partial_payload, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+
+        self.assertEqual(self.todo.title, 'New Title')
+        self.assertEqual(self.todo.description, 'New Description')
+        self.assertEqual(self.todo.deadline, original_deadline)
+        self.assertEqual(self.todo.assignee_id, original_assignee_id)
+        self.assertEqual(self.todo.status, original_status)
+
+    def test_put_partial_object_preserves_reminders_when_omitted(self):
+        original_reminders = [{'method': 'popup', 'minutes': 15}]
+        self.todo.reminders = original_reminders
+        self.todo.save(update_fields=['reminders'])
+
+        partial_payload = {
+            'title': 'Title Without Reminders Update'
+        }
+
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.put(self.url, partial_payload, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+
+        self.assertEqual(self.todo.title, 'Title Without Reminders Update')
+        self.assertEqual(self.todo.reminders, original_reminders)
+
+    def test_put_partial_object_deadline_and_status_only(self):
+        original_title = self.todo.title
+        original_description = self.todo.description
+        new_deadline = timezone.now() + timedelta(days=5)
+
+        partial_payload = {
+            'deadline': new_deadline.isoformat()
+        }
+
+        self.client.force_authenticate(user=self.dean)
+        resp = self.client.put(self.url, partial_payload, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+
+        self.assertIsNotNone(self.todo.deadline)
+        delta = abs((self.todo.deadline - new_deadline).total_seconds())
+        self.assertLessEqual(delta, 2)
+        self.assertEqual(self.todo.title, original_title)
+        self.assertEqual(self.todo.description, original_description)
+
 
 class ToDoRemindersDeadlineUpdateTests(BaseTest):
     def setUp(self):
