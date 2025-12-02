@@ -18,6 +18,8 @@ from apps.todo_app.utils import get_todo, cancel_pending_notifications_for_user,
 from core.mixins import ErrorResponseMixin
 from core.pagination import DefaultPagination
 from core.serializers import ErrorResponseSerializer
+from apps.todo_app.calendar.services import GoogleCalendarService
+from core.exceptions import GoogleCalendarAuthRequired
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +173,39 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
 
         deadline_changed = (old_deadline is not None and getattr(todo, 'deadline', None) is not None and old_deadline !=
                             getattr(todo, 'deadline', None))
+
+        deadline_removed = (old_deadline is not None and getattr(todo, 'deadline', None) is None)
+
+        if deadline_removed:
+            potential_users = []
+            creator_user = getattr(todo, 'creator', None)
+            assignee_user = getattr(todo, 'assignee', None)
+            if creator_user:
+                potential_users.append(creator_user)
+            if assignee_user and getattr(assignee_user, 'id', None) != getattr(creator_user, 'id', None):
+                potential_users.append(assignee_user)
+
+            for u in potential_users:
+                try:
+                    if has_calendar_integration(u):
+                        try:
+                            service = GoogleCalendarService(u)
+                            if getattr(service, 'service', None) and getattr(service, 'delete_event', None):
+                                service.delete_event()
+                        except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
+                            logger.exception("Failed to delete calendar event during deadline removal "
+                                             "for todo id=%s user=%s: %s", getattr(todo, 'id', None),
+                                             getattr(u, 'id', None), exc)
+                    else:
+                        try:
+                            cancel_pending_notifications_for_user(todo, u, reason='Deadline removed')
+                        except (DatabaseError, CeleryError, RuntimeError, ValueError) as exc:
+                            logger.exception("Failed to cancel pending notifications during deadline "
+                                             "removal for todo id=%s user=%s: %s", getattr(todo, 'id', None),
+                                             getattr(u, 'id', None), exc)
+                except (GoogleCalendarAuthRequired, Exception) as exc:
+                    logger.exception("Error handling deadline removal for todo id=%s user=%s: %s",
+                                     getattr(todo, 'id', None), getattr(u, 'id', None), exc)
 
         if deadline_changed:
             potential_users = []

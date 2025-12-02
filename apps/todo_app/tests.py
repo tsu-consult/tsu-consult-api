@@ -1368,3 +1368,44 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
             Notification.objects.filter(todo=self.todo, user=self.creator, status=Notification.Status.FAILED).exists())
         self.assertTrue(
             Notification.objects.filter(todo=self.todo, user=self.assignee, status=Notification.Status.FAILED).exists())
+
+    def test_deadline_removed_cancels_fallback_notifications_when_no_integration(self):
+        self._create_notifications_for_reminders(self.creator, [15], status=Notification.Status.PENDING,
+                                                 shift=60)
+        self._create_notifications_for_reminders(self.assignee, [60], status=Notification.Status.PENDING,
+                                                 shift=60)
+
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=self.creator)
+
+        resp = self.client.put(url, {"deadline": None}, format='json')
+        self.assertEqual(resp.status_code, 200)
+
+        failed_creator = Notification.objects.filter(todo=self.todo, user=self.creator,
+                                                     status=Notification.Status.FAILED)
+        failed_assignee = Notification.objects.filter(todo=self.todo, user=self.assignee,
+                                                      status=Notification.Status.FAILED)
+        self.assertTrue(failed_creator.exists())
+        self.assertTrue(failed_assignee.exists())
+
+        for n in list(failed_creator) + list(failed_assignee):
+            self.assertIsNone(n.celery_task_id)
+            self.assertIn('Deadline removed', (n.last_error or ''))
+
+        self.assertTrue(self.mock_revoke.called)
+
+    def test_deadline_removed_deletes_calendar_event_when_user_integrated(self):
+        url = f"/todo/{self.todo.id}/"
+        self.client.force_authenticate(user=self.creator)
+
+        with patch('apps.todo_app.views.has_calendar_integration', return_value=True), \
+             patch('apps.todo_app.views.GoogleCalendarService') as mock_service_cls:
+            mock_service = mock_service_cls.return_value
+            mock_service.service = True
+            mock_service.delete_event = Mock()
+
+            resp = self.client.put(url, {"deadline": None}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(mock_service.delete_event.called)
+        self.assertGreaterEqual(mock_service.delete_event.call_count, 1)
