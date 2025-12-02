@@ -8,7 +8,7 @@ from apps.auth_app.models import User
 from apps.todo_app.fallback.services import FallbackReminderService
 from apps.todo_app.models import ToDo
 from apps.todo_app.calendar.services import GoogleCalendarService
-from core.exceptions import GoogleCalendarAuthRequired
+from core.exceptions import GoogleCalendarAuthRequired, EventNotFound
 from apps.todo_app.utils import create_notification_safe, notify_new_assignee_and_cleanup_old
 
 logger = logging.getLogger(__name__)
@@ -44,18 +44,23 @@ class CalendarSyncManager:
 
         return bool(event_id)
 
-    def _update_event(self, reminders: Optional[List[Dict[str, Any]]]) -> bool:
+    def _update_event(self, reminders: Optional[List[Dict[str, Any]]], for_creator: bool) -> bool:
         if getattr(self.calendar_service, 'service', None) and callable(getattr(self.calendar_service,
                                                                                 'update_event', None)):
             try:
                 return bool(self.calendar_service.update_event(self.todo, reminders))
+            except EventNotFound:
+                self._clear_event_metadata(for_creator)
+                logger.info("Calendar event for todo id=%s missing in Google; clearing stored ids before recreate.",
+                            getattr(self.todo, 'id', None))
+                return False
             except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
                 logger.exception("Calendar update_event failed for todo id=%s: %s", getattr(self.todo, 'id', None), exc)
         return False
 
     def _sync_calendar(self, reminders: Optional[List[Dict[str, Any]]], target_user: User,
                        for_creator: bool = True) -> bool:
-        updated = self._update_event(reminders)
+        updated = self._update_event(reminders, for_creator)
 
         created = False
         if not updated:
@@ -90,6 +95,20 @@ class CalendarSyncManager:
         except (HttpError, GoogleCalendarAuthRequired, ValueError, TypeError, RuntimeError) as exc:
             logger.exception("Failed to sync calendar for assignee (actor) todo id=%s: %s",
                              getattr(self.todo, 'id', None), exc)
+
+    def _clear_event_metadata(self, for_creator: bool) -> None:
+        id_field = 'calendar_event_id' if for_creator else 'assignee_calendar_event_id'
+        active_field = 'calendar_event_active' if for_creator else 'assignee_calendar_event_active'
+        current_id = getattr(self.todo, id_field, None)
+        current_active = getattr(self.todo, active_field, False)
+        if current_id is None and not current_active:
+            return
+        setattr(self.todo, id_field, None)
+        setattr(self.todo, active_field, False)
+        try:
+            self.todo.save(update_fields=[id_field, active_field])
+        except Exception as exc:
+            logger.exception("Failed to clear %s for todo id=%s: %s", id_field, getattr(self.todo, 'id', None), exc)
 
 
 def sync_calendars(todo: ToDo, actor_user: User, old_assignee: Optional[User] = None,

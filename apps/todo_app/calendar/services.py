@@ -386,7 +386,7 @@ class GoogleCalendarService:
                          getattr(todo, 'id', None), exc)
 
         if not existing:
-            return False
+            raise EventNotFound(f"Event missing for todo id={getattr(todo, 'id', None)}")
 
         event_id = existing.get('id')
 
@@ -408,7 +408,7 @@ class GoogleCalendarService:
                 status = None
 
             if status == 404:
-                return False
+                raise EventNotFound(event_id)
             if status in (401, 403):
                 self._handle_refresh_error()
 
