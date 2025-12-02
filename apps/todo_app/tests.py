@@ -1019,6 +1019,54 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn('status', str(resp.data))
 
+    def test_dean_updates_reminders_updates_creator_reminders(self):
+        self.client.force_authenticate(user=self.dean)
+        new_reminders = [{'method': 'popup', 'minutes': 10}]
+        resp = self.client.patch(self.url, {'reminders': new_reminders}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertTrue(isinstance(self.todo.reminders, list) and len(self.todo.reminders) > 0)
+        self.assertTrue(any(r.get('minutes') == 10 for r in self.todo.reminders))
+        ar = self.todo.assignee_reminders
+        if ar is None:
+            self.assertIsNone(ar)
+        else:
+            self.assertTrue(isinstance(ar, list))
+            self.assertFalse(any(r.get('minutes') == 10 for r in ar))
+
+    def test_assignee_updates_reminders_updates_assignee_reminders(self):
+        self.client.force_authenticate(user=self.teacher)
+        new_reminders = [{'method': 'popup', 'minutes': 20}]
+        resp = self.client.patch(self.url, {'reminders': new_reminders}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.todo.refresh_from_db()
+        self.assertTrue(isinstance(self.todo.assignee_reminders, list))
+        self.assertTrue(any(r.get('minutes') == 20 for r in self.todo.assignee_reminders))
+        self.assertTrue(isinstance(self.todo.reminders, list))
+        self.assertFalse(any(r.get('minutes') == 20 for r in self.todo.reminders))
+
+    def test_creator_equals_assignee_updates_only_reminders(self):
+        same_teacher = User.objects.create_user(email='same@example.com', username='same', role='teacher')
+        todo = ToDo.objects.create(
+            title='Self Task',
+            description='Self assigned',
+            deadline=timezone.now() + timedelta(days=1),
+            creator=same_teacher,
+            assignee=same_teacher,
+            reminders=[{'method': 'popup', 'minutes': 5}],
+            assignee_reminders=[]
+        )
+
+        url = f"/todo/{todo.id}/"
+        self.client.force_authenticate(user=same_teacher)
+        new_reminders = [{'method': 'popup', 'minutes': 30}]
+        resp = self.client.patch(url, {'reminders': new_reminders}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        todo.refresh_from_db()
+        self.assertTrue(isinstance(todo.reminders, list))
+        self.assertTrue(any(r.get('minutes') == 30 for r in todo.reminders))
+        self.assertEqual(todo.assignee_reminders, [])
+
 
 class ToDoRemindersDeadlineUpdateTests(BaseTest):
     def setUp(self):
