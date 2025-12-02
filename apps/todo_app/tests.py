@@ -945,6 +945,15 @@ class ToDoUpdateTests(APITestCase):
             todo = ToDo.objects.get(id=tid)
             return todo, new_reminders
 
+    def _patch_deadline(self, user, url=None, days=2):
+        if url is None:
+            url = self.url
+        self.client.force_authenticate(user=user)
+        new_deadline = timezone.now() + timedelta(days=days)
+        resp = self.client.patch(url, {'deadline': new_deadline.isoformat()}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        return resp, new_deadline
+
     def test_update_title(self):
         self.client.force_authenticate(user=self.dean)
         new_title = "Updated Title"
@@ -962,10 +971,7 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(self.todo.description, new_desc)
 
     def test_update_deadline(self):
-        self.client.force_authenticate(user=self.dean)
-        future = timezone.now() + timedelta(days=2)
-        resp = self.client.patch(self.url, {'deadline': future.isoformat()}, format='json')
-        self.assertEqual(resp.status_code, 200)
+        resp, future = self._patch_deadline(self.dean, days=2)
         self.todo.refresh_from_db()
         self.assertIsNotNone(self.todo.deadline)
         delta = abs((self.todo.deadline - future).total_seconds())
@@ -1103,10 +1109,7 @@ class ToDoUpdateTests(APITestCase):
         )
 
         with patch('apps.todo_app.utils.has_calendar_integration', return_value=False):
-            self.client.force_authenticate(user=self.dean)
-            new_deadline = timezone.now() + timedelta(days=2)
-            resp = self.client.patch(self.url, {'deadline': new_deadline.isoformat()}, format='json')
-            self.assertEqual(resp.status_code, 200)
+            self._patch_deadline(self.dean, days=2)
 
         notif_deadline.refresh_from_db()
         notif_other.refresh_from_db()
