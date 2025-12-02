@@ -960,6 +960,10 @@ class ToDoUpdateTests(APITestCase):
         self.todo.refresh_from_db()
         return resp
 
+    def _patch_status(self, user, status):
+        self.client.force_authenticate(user=user)
+        return self.client.patch(self.url, {'status': status}, format='json')
+
     def test_update_title(self):
         self.client.force_authenticate(user=self.dean)
         new_title = "Updated Title"
@@ -1122,16 +1126,14 @@ class ToDoUpdateTests(APITestCase):
         self.assertIn('status', str(resp.data))
 
     def test_dean_cannot_change_status_when_not_assignee(self):
-        self.client.force_authenticate(user=self.dean)
-        resp = self.client.patch(self.url, {'status': ToDo.Status.DONE}, format='json')
+        resp = self._patch_status(self.dean, ToDo.Status.DONE)
         self.assertEqual(resp.status_code, 400)
         self.assertIn('Only assignee may change status', str(resp.data))
         self.todo.refresh_from_db()
         self.assertEqual(self.todo.status, ToDo.Status.IN_PROGRESS)
 
     def test_assignee_can_change_status(self):
-        self.client.force_authenticate(user=self.teacher)
-        resp = self.client.patch(self.url, {'status': ToDo.Status.DONE}, format='json')
+        resp = self._patch_status(self.teacher, ToDo.Status.DONE)
         self.assertEqual(resp.status_code, 200)
         self.todo.refresh_from_db()
         self.assertEqual(self.todo.status, ToDo.Status.DONE)
@@ -1140,8 +1142,7 @@ class ToDoUpdateTests(APITestCase):
         self.todo.status = ToDo.Status.DONE
         self.todo.save(update_fields=['status'])
 
-        self.client.force_authenticate(user=self.teacher)
-        resp = self.client.patch(self.url, {'status': ToDo.Status.IN_PROGRESS}, format='json')
+        resp = self._patch_status(self.teacher, ToDo.Status.IN_PROGRESS)
 
         self.assertEqual(resp.status_code, 200)
         self.todo.refresh_from_db()
