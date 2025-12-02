@@ -101,6 +101,17 @@ class ToDoListView(ErrorResponseMixin, APIView):
 class ToDoDetailView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsActive, IsTeacherOrDean]
 
+    @staticmethod
+    def _get_potential_users(todo):
+        potential_users = []
+        creator_user = getattr(todo, 'creator', None)
+        assignee_user = getattr(todo, 'assignee', None)
+        if creator_user:
+            potential_users.append(creator_user)
+        if assignee_user and getattr(assignee_user, 'id', None) != getattr(creator_user, 'id', None):
+            potential_users.append(assignee_user)
+        return potential_users
+
     @swagger_auto_schema(
         tags=["To Do"],
         operation_summary="Детали задачи",
@@ -177,13 +188,7 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         deadline_removed = (old_deadline is not None and getattr(todo, 'deadline', None) is None)
 
         if deadline_removed:
-            potential_users = []
-            creator_user = getattr(todo, 'creator', None)
-            assignee_user = getattr(todo, 'assignee', None)
-            if creator_user:
-                potential_users.append(creator_user)
-            if assignee_user and getattr(assignee_user, 'id', None) != getattr(creator_user, 'id', None):
-                potential_users.append(assignee_user)
+            potential_users = self._get_potential_users(todo)
 
             for u in potential_users:
                 try:
@@ -208,13 +213,7 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
                                      getattr(todo, 'id', None), getattr(u, 'id', None), exc)
 
         if deadline_changed:
-            potential_users = []
-            creator_user = getattr(todo, 'creator', None)
-            assignee_user = getattr(todo, 'assignee', None)
-            if creator_user:
-                potential_users.append(creator_user)
-            if assignee_user and getattr(assignee_user, 'id', None) != getattr(creator_user, 'id', None):
-                potential_users.append(assignee_user)
+            potential_users = self._get_potential_users(todo)
 
             for u in potential_users:
                 if has_calendar_integration(u):
