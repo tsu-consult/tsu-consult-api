@@ -929,6 +929,22 @@ class ToDoUpdateTests(APITestCase):
         self.client.force_authenticate(user=user)
         return self.client.post('/todo/', data, format='json')
 
+    def _patch_reminders_and_get(self, user, url=None, minutes=10):
+        if url is None:
+            url = self.url
+        self.client.force_authenticate(user=user)
+        new_reminders = [{'method': 'popup', 'minutes': minutes}]
+        resp = self.client.patch(url, {'reminders': new_reminders}, format='json')
+        self.assertEqual(resp.status_code, 200)
+
+        if url == self.url:
+            self.todo.refresh_from_db()
+            return self.todo, new_reminders
+        else:
+            tid = int(url.rstrip('/').split('/')[-1])
+            todo = ToDo.objects.get(id=tid)
+            return todo, new_reminders
+
     def test_update_title(self):
         self.client.force_authenticate(user=self.dean)
         new_title = "Updated Title"
@@ -963,12 +979,8 @@ class ToDoUpdateTests(APITestCase):
         self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
 
     def test_update_reminders(self):
-        self.client.force_authenticate(user=self.dean)
-        new_reminders = [{'method': 'popup', 'minutes': 10}]
-        resp = self.client.patch(self.url, {'reminders': new_reminders}, format='json')
-        self.assertEqual(resp.status_code, 200)
-        self.todo.refresh_from_db()
-        self.assertTrue(isinstance(self.todo.reminders, list) and len(self.todo.reminders) > 0)
+        todo, new_reminders = self._patch_reminders_and_get(self.dean)
+        self.assertTrue(isinstance(todo.reminders, list) and len(todo.reminders) > 0)
 
     def test_cannot_set_empty_title_on_update(self):
         self.client.force_authenticate(user=self.dean)
