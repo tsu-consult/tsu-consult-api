@@ -1589,6 +1589,137 @@ class ToDoUpdateTests(APITestCase):
             self.todo.refresh_from_db()
             self.assertEqual(self.todo.assignee_id, self.other_teacher.id)
 
+    def test_creator_update_with_integration_updates_calendar_event(self):
+        self.todo.calendar_event_id = 'creator-event-123'
+        self.todo.calendar_event_active = True
+        self.todo.reminders = [{'method': 'popup', 'minutes': 10}]
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active', 'reminders'])
+
+        with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
+                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+            mock_gc = mock_gc_cls.return_value
+            mock_gc.service = True
+            mock_gc.update_event = Mock(return_value=True)
+
+            self.client.force_authenticate(user=self.dean)
+            new_title = "Updated Title with Integration"
+            resp = self.client.patch(self.url, {'title': new_title}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreaterEqual(mock_gc.update_event.call_count, 1)
+
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.title, new_title)
+        self.assertEqual(self.todo.calendar_event_id, 'creator-event-123')
+        self.assertTrue(self.todo.calendar_event_active)
+
+    def test_assignee_update_with_integration_updates_calendar_event(self):
+        self.todo.assignee_calendar_event_id = 'assignee-event-456'
+        self.todo.assignee_calendar_event_active = True
+        self.todo.assignee_reminders = [{'method': 'popup', 'minutes': 20}]
+        self.todo.save(update_fields=['assignee_calendar_event_id', 'assignee_calendar_event_active',
+                                      'assignee_reminders'])
+
+        with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
+                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+            mock_gc = mock_gc_cls.return_value
+            mock_gc.service = True
+            mock_gc.update_event = Mock(return_value=True)
+
+            self.client.force_authenticate(user=self.teacher)
+            new_reminders = [{'method': 'popup', 'minutes': 50}]
+            resp = self.client.patch(self.url, {'reminders': new_reminders}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        mock_gc.update_event.assert_called_once()
+
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_reminders, new_reminders)
+        self.assertEqual(self.todo.assignee_calendar_event_id, 'assignee-event-456')
+        self.assertTrue(self.todo.assignee_calendar_event_active)
+
+    def test_both_creator_and_assignee_events_updated_when_creator_changes_task(self):
+        self.todo.calendar_event_id = 'creator-event-789'
+        self.todo.calendar_event_active = True
+        self.todo.reminders = [{'method': 'popup', 'minutes': 15}]
+        self.todo.assignee_calendar_event_id = 'assignee-event-789'
+        self.todo.assignee_calendar_event_active = True
+        self.todo.assignee_reminders = [{'method': 'popup', 'minutes': 30}]
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active', 'reminders',
+                                      'assignee_calendar_event_id', 'assignee_calendar_event_active',
+                                      'assignee_reminders'])
+
+        with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
+                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+            mock_gc = mock_gc_cls.return_value
+            mock_gc.service = True
+            mock_gc.update_event = Mock(return_value=True)
+
+            self.client.force_authenticate(user=self.dean)
+            new_description = "Updated description affecting both calendars"
+            resp = self.client.patch(self.url, {'description': new_description}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mock_gc.update_event.call_count, 2)
+
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.description, new_description)
+        self.assertEqual(self.todo.calendar_event_id, 'creator-event-789')
+        self.assertTrue(self.todo.calendar_event_active)
+        self.assertEqual(self.todo.assignee_calendar_event_id, 'assignee-event-789')
+        self.assertTrue(self.todo.assignee_calendar_event_active)
+
+    def test_creator_update_with_integration_creates_event_if_not_exists(self):
+        self.todo.calendar_event_id = None
+        self.todo.calendar_event_active = False
+        self.todo.reminders = [{'method': 'popup', 'minutes': 25}]
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active', 'reminders'])
+
+        with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
+                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+            mock_gc = mock_gc_cls.return_value
+            mock_gc.service = True
+            mock_gc.update_event = Mock(return_value=False)
+            mock_gc.create_event = Mock(return_value='new-creator-event-id')
+
+            self.client.force_authenticate(user=self.dean)
+            new_title = "Title triggers event creation"
+            resp = self.client.patch(self.url, {'title': new_title}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreaterEqual(mock_gc.create_event.call_count, 1)
+
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.title, new_title)
+        self.assertIsNotNone(self.todo.calendar_event_id)
+        self.assertTrue(self.todo.calendar_event_active)
+
+    def test_assignee_update_with_integration_creates_event_if_not_exists(self):
+        self.todo.assignee_calendar_event_id = None
+        self.todo.assignee_calendar_event_active = False
+        self.todo.assignee_reminders = [{'method': 'popup', 'minutes': 35}]
+        self.todo.save(update_fields=['assignee_calendar_event_id', 'assignee_calendar_event_active',
+                                      'assignee_reminders'])
+
+        with patch('apps.todo_app.calendar.managers.GoogleCalendarService') as mock_gc_cls, \
+                patch('apps.todo_app.views.has_calendar_integration', return_value=True):
+            mock_gc = mock_gc_cls.return_value
+            mock_gc.service = True
+            mock_gc.update_event = Mock(return_value=False)
+            mock_gc.create_event = Mock(return_value='new-assignee-event-id')
+
+            self.client.force_authenticate(user=self.teacher)
+            new_reminders = [{'method': 'popup', 'minutes': 40}]
+            resp = self.client.patch(self.url, {'reminders': new_reminders}, format='json')
+
+        self.assertEqual(resp.status_code, 200)
+        mock_gc.create_event.assert_called_once()
+
+        self.todo.refresh_from_db()
+        self.assertEqual(self.todo.assignee_reminders, new_reminders)
+        self.assertIsNotNone(self.todo.assignee_calendar_event_id)
+        self.assertTrue(self.todo.assignee_calendar_event_active)
+
 
 class ToDoRemindersDeadlineUpdateTests(BaseTest):
     def setUp(self):
