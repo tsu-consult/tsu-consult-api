@@ -27,9 +27,15 @@ class DeanApprovalAdmin(admin.ModelAdmin):
 
                 user: User = approval.user
                 user.status = user_status
-                user.save()
 
-                print(f"Администратор {request.user.username} изменил статус деканата {user.username} → {new_status}")
+                if new_status == DeanApproval.Status.APPROVED:
+                    user.is_staff = True
+                    print(f"Администратор {request.user.username} подтвердил деканат {user.username} (is_staff=True)")
+                elif new_status == DeanApproval.Status.REJECTED:
+                    user.is_staff = False
+                    print(f"Администратор {request.user.username} отклонил деканат {user.username} (is_staff=False)")
+
+                user.save()
 
                 count += 1
 
@@ -64,10 +70,12 @@ class DeanApprovalAdmin(admin.ModelAdmin):
             if old_obj.status != obj.status:
                 if obj.status == DeanApproval.Status.APPROVED:
                     user.status = User.Status.ACTIVE
-                    print(f"Администратор {request.user.username} подтвердил деканат {user.username}")
+                    user.is_staff = True
+                    print(f"Администратор {request.user.username} подтвердил деканат {user.username} (is_staff=True)")
                 elif obj.status == DeanApproval.Status.REJECTED:
                     user.status = User.Status.REJECTED
-                    print(f"Администратор {request.user.username} отклонил деканат {user.username}")
+                    user.is_staff = False
+                    print(f"Администратор {request.user.username} отклонил деканат {user.username} (is_staff=False)")
                 user.save()
 
         super().save_model(request, obj, form, change)

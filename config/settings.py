@@ -128,9 +128,9 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Jazzmin
 JAZZMIN_SETTINGS = {
     "site_title": "TSU Consult",
-    "site_header": "TSU Consult Admin",
-    "site_brand": "TSU Consult Admin",
-    "welcome_sign": "Welcome to the TSU Consult Admin",
+    "site_header": "TSU Consult",
+    "site_brand": "TSU Consult",
+    "welcome_sign": "Welcome to the TSU Consult",
 
     "topmenu_links": [
 
