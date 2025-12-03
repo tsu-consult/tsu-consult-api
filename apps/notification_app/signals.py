@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 
 from django.conf import settings
 from django.db.models.signals import post_save, post_delete
@@ -6,7 +6,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 from celery.exceptions import CeleryError
 
-from apps.auth_app.models import TeacherApproval
+from apps.auth_app.models import TeacherApproval, DeanApproval
 from apps.notification_app.models import Notification
 from apps.notification_app.tasks import (send_notification_task, sync_existing_todos, transfer_unsent_reminders_task,
                                          cancel_pending_fallbacks_for_user)
@@ -47,6 +47,30 @@ def notify_teacher_on_approval_status(sender, instance: TeacherApproval, created
             title = "Заявка отклонена"
             reason_text = f"\n\n<b>Причина:</b> {instance.reason}" if instance.reason else ""
             message = f"К сожалению, ваша заявка на подтверждение преподавателя была отклонена.{reason_text}"
+
+        Notification.objects.create(
+            user=user,
+            title=title,
+            message=message,
+            status=Notification.Status.PENDING,
+        )
+
+
+@receiver(post_save, sender=DeanApproval)
+def notify_dean_on_approval_status(sender, instance: DeanApproval, created, **kwargs):
+    if created:
+        return
+
+    if instance.status in [DeanApproval.Status.APPROVED, DeanApproval.Status.REJECTED]:
+        user = instance.user
+
+        if instance.status == DeanApproval.Status.APPROVED:
+            title = "Заявка одобрена"
+            message = "Поздравляем! Ваша заявка на подтверждение аккаунта была одобрена."
+        else:
+            title = "Заявка отклонена"
+            reason_text = f"\n\n<b>Причина:</b> {instance.reason}" if instance.reason else ""
+            message = f"К сожалению, ваша заявка на подтверждение аккаунта была отклонена.{reason_text}"
 
         Notification.objects.create(
             user=user,
