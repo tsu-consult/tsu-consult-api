@@ -112,5 +112,35 @@ class TeacherApproval(models.Model):
         return f"TeacherApproval(id={self.id}, user={self.user_id}, status={self.status})"
 
     class Meta:
-        verbose_name = "Approval"
-        verbose_name_plural = "Approvals"
+        verbose_name = "Teacher Approval"
+        verbose_name_plural = "Teacher Approvals"
+
+
+class DeanApproval(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="dean_approvals",
+        limit_choices_to={"role": "dean"},
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    reason = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"DeanApproval(id={self.id}, user={self.user_id}, status={self.status})"
+
+    class Meta:
+        verbose_name = "Dean Approval"
+        verbose_name_plural = "Dean Approvals"

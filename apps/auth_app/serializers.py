@@ -2,7 +2,7 @@
 from django.contrib.auth import get_user_model
 from django.core.validators import RegexValidator
 
-from apps.auth_app.models import TeacherApproval
+from apps.auth_app.models import TeacherApproval, DeanApproval
 from apps.auth_app.validators import validate_human_name
 
 User = get_user_model()
@@ -11,6 +11,7 @@ password_validator = RegexValidator(
     regex=r'^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$',
     message="Password must be at least 8 characters long, include at least one letter and one number"
 )
+
 
 class RegisterRequestSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=False)
@@ -35,9 +36,9 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         role = attrs.get("role", User.Role.STUDENT)
 
-        if role in [User.Role.STUDENT, User.Role.TEACHER]:
+        if role in [User.Role.STUDENT, User.Role.TEACHER, User.Role.DEAN]:
             if not attrs.get("telegram_id"):
-                raise serializers.ValidationError("Students and teachers require telegram_id.")
+                raise serializers.ValidationError("Students, teachers and deans require telegram_id.")
             attrs["email"] = attrs.get("email") or None
         elif role == User.Role.ADMIN:
             if not attrs.get("email") or not attrs.get("password"):
@@ -68,9 +69,9 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
 
         user = User(**validated_data)
 
-        if role in [User.Role.STUDENT, User.Role.TEACHER]:
+        if role in [User.Role.STUDENT, User.Role.TEACHER, User.Role.DEAN]:
             user.set_unusable_password()
-            if role == User.Role.TEACHER:
+            if role in [User.Role.TEACHER, User.Role.DEAN]:
                 user.status = User.Status.PENDING
         else:
             user.set_password(validated_data["password"])
@@ -79,8 +80,11 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
 
         if role == User.Role.TEACHER:
             TeacherApproval.objects.create(user=user)
+        elif role == User.Role.DEAN:
+            DeanApproval.objects.create(user=user)
 
         return user
+
 
 class RegisterResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
@@ -105,6 +109,7 @@ class LoginRequestSerializer(serializers.Serializer):
 
         raise serializers.ValidationError("Either telegram_id or email and password are required.")
 
+
 class LoginResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
     refresh = serializers.CharField()
@@ -112,6 +117,7 @@ class LoginResponseSerializer(serializers.Serializer):
 
 class RefreshRequestSerializer(serializers.Serializer):
     refresh = serializers.CharField()
+
 
 class RefreshResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
