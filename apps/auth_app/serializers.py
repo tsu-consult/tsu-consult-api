@@ -143,3 +143,19 @@ class RefreshResponseSerializer(serializers.Serializer):
 
 class LogoutRequestSerializer(serializers.Serializer):
     refresh = serializers.CharField()
+
+
+class AddCredentialsRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(
+        write_only=True,
+        validators=[password_validator],
+        style={'input_type': 'password'},
+        required=True
+    )
+
+    @staticmethod
+    def validate_email(value):
+        if User.objects.filter(email=value).exclude(email__endswith='@telegram.local').exists():
+            raise serializers.ValidationError("This email is already in use by another user.")
+        return value

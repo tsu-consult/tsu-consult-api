@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
@@ -10,11 +10,12 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.mixins import ErrorResponseMixin
 from core.serializers import ErrorResponseSerializer
+from .permissions import IsDean
 from .serializers import (
     RegisterRequestSerializer, RegisterResponseSerializer,
     LoginRequestSerializer, LoginResponseSerializer,
     RefreshRequestSerializer, RefreshResponseSerializer,
-    LogoutRequestSerializer
+    LogoutRequestSerializer, AddCredentialsRequestSerializer
 )
 
 User = get_user_model()
@@ -182,3 +183,49 @@ class LogoutView(ErrorResponseMixin, APIView):
         except TokenError:
             return ErrorResponseMixin.format_error(request, 400,
                                                    "Bad Request", "Invalid or expired refresh token")
+
+
+class AddCredentialsView(ErrorResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsDean]
+
+    @swagger_auto_schema(
+        tags=['Auth'],
+        operation_summary="Добавление email и пароля себе",
+        operation_description="Позволяет деканату добавить email и пароль (только самому себе), "
+                              "если он зарегистрировался через telegram_id",
+        request_body=AddCredentialsRequestSerializer,
+        responses={
+            200: openapi.Response(description="Учетные данные успешно добавлены"),
+            400: openapi.Response(description="Некорректные данные или пользователь уже имеет email/пароль",
+                                  schema=ErrorResponseSerializer),
+            403: openapi.Response(description="Недостаточно прав доступа", schema=ErrorResponseSerializer),
+            404: openapi.Response(description="Пользователь не найден", schema=ErrorResponseSerializer),
+            500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
+        },
+    )
+    def post(self, request):
+        serializer = AddCredentialsRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return ErrorResponseMixin.format_error(request, 400, "Bad Request", serializer.errors)
+
+        email = serializer.validated_data["email"]
+        password = serializer.validated_data["password"]
+        user = request.user
+
+        if user.email and not user.email.endswith('@telegram.local'):
+            return ErrorResponseMixin.format_error(request, 400, "Bad Request",
+                                                   "User already has email credentials")
+
+        if user.has_usable_password():
+            return ErrorResponseMixin.format_error(request, 400, "Bad Request",
+                                                   "User already has a password")
+
+        try:
+            user.email = email
+            user.set_password(password)
+            user.save()
+
+            return Response(status=200)
+        except IntegrityError:
+            return ErrorResponseMixin.format_error(request, 400, "Bad Request",
+                                                   "Email already in use.")
