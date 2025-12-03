@@ -3,6 +3,7 @@ from django.utils.translation import gettext_lazy as _
 from apps.auth_app.models import TeacherApproval, User
 from ..site import admin_site
 
+
 @admin.register(TeacherApproval, site=admin_site)
 class TeacherApprovalAdmin(admin.ModelAdmin):
     list_display = ('user', 'status', 'created_at', 'updated_at')
@@ -28,7 +29,9 @@ class TeacherApprovalAdmin(admin.ModelAdmin):
                 user.status = user_status
                 user.save()
 
-                print(f"Администратор {request.user.username} изменил статус преподавателя {user.username} → {new_status}")
+                print(
+                    f"Администратор {request.user.username} изменил статус преподавателя "
+                    f"{user.username} → {new_status}")
 
                 count += 1
 

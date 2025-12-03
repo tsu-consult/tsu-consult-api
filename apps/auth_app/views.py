@@ -19,15 +19,18 @@ from .serializers import (
 
 User = get_user_model()
 
+
 class RegisterView(ErrorResponseMixin, APIView):
     permission_classes = [AllowAny]
+
     @swagger_auto_schema(
         tags=['Auth'],
         operation_summary="Регистрация пользователя (Telegram или админ)",
         request_body=RegisterRequestSerializer,
         responses={
             200: openapi.Response(description="Успешная регистрация", schema=RegisterResponseSerializer),
-            400: openapi.Response(description="Некорректные данные или пользователь уже существует", schema=ErrorResponseSerializer),
+            400: openapi.Response(description="Некорректные данные или пользователь уже существует",
+                                  schema=ErrorResponseSerializer),
             500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
         },
     )
@@ -82,7 +85,8 @@ class LoginView(ErrorResponseMixin, APIView):
         if telegram_id:
             user = User.objects.filter(telegram_id=telegram_id).first()
             if not user:
-                return ErrorResponseMixin.format_error(request, 404, "Not Found", "User not found")
+                return ErrorResponseMixin.format_error(request, 404, "Not Found",
+                                                       "User not found")
             refresh = RefreshToken.for_user(user)
             return Response({
                 "access": str(refresh.access_token),
@@ -93,10 +97,12 @@ class LoginView(ErrorResponseMixin, APIView):
             try:
                 user = User.objects.get(email=email)
             except User.DoesNotExist:
-                return ErrorResponseMixin.format_error(request, 404, "Not Found", "User not found")
+                return ErrorResponseMixin.format_error(request, 404, "Not Found",
+                                                       "User not found")
 
             if not user.check_password(password):
-                return ErrorResponseMixin.format_error(request, 401, "Unauthorized", "Invalid email or password")
+                return ErrorResponseMixin.format_error(request, 401, "Unauthorized",
+                                                       "Invalid email or password")
 
             refresh = RefreshToken.for_user(user)
             return Response({
@@ -104,7 +110,8 @@ class LoginView(ErrorResponseMixin, APIView):
                 "refresh": str(refresh),
             }, 200)
 
-        return ErrorResponseMixin.format_error(request, 400, "Bad Request", "Invalid login data")
+        return ErrorResponseMixin.format_error(request, 400, "Bad Request",
+                                               "Invalid login data")
 
 
 class RefreshView(ErrorResponseMixin, APIView):
@@ -116,7 +123,8 @@ class RefreshView(ErrorResponseMixin, APIView):
         request_body=RefreshRequestSerializer,
         responses={
             200: openapi.Response(description="Успешное обновление токена", schema=RefreshResponseSerializer),
-            400: openapi.Response(description="Недействительный или просроченный refresh-токен", schema=ErrorResponseSerializer),
+            400: openapi.Response(description="Недействительный или просроченный refresh-токен",
+                                  schema=ErrorResponseSerializer),
             404: openapi.Response(description="Пользователь не найден", schema=ErrorResponseSerializer),
             500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
         },
@@ -143,7 +151,7 @@ class RefreshView(ErrorResponseMixin, APIView):
 
         except TokenError:
             return ErrorResponseMixin.format_error(request, 400,
-                                                   "Bad Request","Invalid or expired refresh token")
+                                                   "Bad Request", "Invalid or expired refresh token")
 
 
 class LogoutView(ErrorResponseMixin, APIView):
@@ -155,7 +163,8 @@ class LogoutView(ErrorResponseMixin, APIView):
         request_body=LogoutRequestSerializer,
         responses={
             200: openapi.Response(description="Успешный выход"),
-            400: openapi.Response(description="Недействительный или уже отозванный refresh-токен", schema=ErrorResponseSerializer),
+            400: openapi.Response(description="Недействительный или уже отозванный refresh-токен",
+                                  schema=ErrorResponseSerializer),
             500: openapi.Response(description="Внутренняя ошибка сервера", schema=ErrorResponseSerializer),
         },
     )
