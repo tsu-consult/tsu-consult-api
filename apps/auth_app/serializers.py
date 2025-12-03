@@ -36,10 +36,18 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         role = attrs.get("role", User.Role.STUDENT)
 
-        if role in [User.Role.STUDENT, User.Role.TEACHER, User.Role.DEAN]:
+        if role in [User.Role.STUDENT, User.Role.TEACHER]:
             if not attrs.get("telegram_id"):
-                raise serializers.ValidationError("Students, teachers and deans require telegram_id.")
+                raise serializers.ValidationError("Students and teachers require telegram_id.")
             attrs["email"] = attrs.get("email") or None
+        elif role == User.Role.DEAN:
+            if not attrs.get("telegram_id"):
+                raise serializers.ValidationError("Deans require telegram_id.")
+            email = attrs.get("email")
+            password = attrs.get("password")
+            if (email and not password) or (password and not email):
+                raise serializers.ValidationError("For deans, both email and password must be provided together, "
+                                                  "or neither.")
         elif role == User.Role.ADMIN:
             if not attrs.get("email") or not attrs.get("password"):
                 raise serializers.ValidationError("Email and password are required for the administrator.")
@@ -63,18 +71,28 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         role = validated_data.get("role", User.Role.STUDENT)
+        password = validated_data.pop("password", None)
 
         if not validated_data.get("email"):
             validated_data["email"] = f"{validated_data['telegram_id']}@telegram.local"
 
         user = User(**validated_data)
 
-        if role in [User.Role.STUDENT, User.Role.TEACHER, User.Role.DEAN]:
+        if role in [User.Role.STUDENT, User.Role.TEACHER]:
             user.set_unusable_password()
-            if role in [User.Role.TEACHER, User.Role.DEAN]:
-                user.status = User.Status.PENDING
+        elif role == User.Role.DEAN:
+            if password:
+                user.set_password(password)
+            else:
+                user.set_unusable_password()
+            user.status = User.Status.PENDING
+        elif role == User.Role.ADMIN:
+            user.set_password(password)
         else:
-            user.set_password(validated_data["password"])
+            user.set_unusable_password()
+
+        if role == User.Role.TEACHER:
+            user.status = User.Status.PENDING
 
         user.save()
 
