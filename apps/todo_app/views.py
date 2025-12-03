@@ -103,6 +103,21 @@ class ToDoListView(ErrorResponseMixin, APIView):
 class ToDoDetailView(ErrorResponseMixin, APIView):
     permission_classes = [IsAuthenticated, IsActive, IsTeacherOrDean]
 
+    def _validate_todo_access(self, request, todo_id):
+        todo, err = get_todo(request, todo_id)
+        if err:
+            return None, err
+
+        if todo.is_deleted():
+            return None, self.format_error(request, 404, "Not Found",
+                                           "Task has been deleted.")
+
+        if not todo.is_accessible_by(request.user):
+            return None, self.format_error(request, 403, "Forbidden",
+                                           "You do not have permission to perform this action.")
+
+        return todo, None
+
     @swagger_auto_schema(
         tags=["To Do"],
         operation_summary="Детали задачи",
@@ -117,17 +132,9 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         },
     )
     def get(self, request, todo_id):
-        todo, err = get_todo(request, todo_id)
+        todo, err = self._validate_todo_access(request, todo_id)
         if err:
             return err
-
-        if todo.is_deleted():
-            return self.format_error(request, 404, "Not Found",
-                                     "Task has been deleted.")
-
-        if not todo.is_accessible_by(request.user):
-            return self.format_error(request, 403, "Forbidden",
-                                     "You do not have permission to perform this action.")
 
         return Response(ToDoResponseSerializer(todo).data, status=200)
 
@@ -139,17 +146,9 @@ class ToDoDetailView(ErrorResponseMixin, APIView):
         responses=TODO_UPDATE_RESPONSES,
     )
     def put(self, request, todo_id):
-        todo, err = get_todo(request, todo_id)
+        todo, err = self._validate_todo_access(request, todo_id)
         if err:
             return err
-
-        if todo.is_deleted():
-            return self.format_error(request, 404, "Not Found",
-                                     "Task has been deleted.")
-
-        if not todo.is_accessible_by(request.user):
-            return self.format_error(request, 403, "Forbidden",
-                                     "You do not have permission to perform this action.")
 
         update_service = ToDoUpdateService(todo, request.user)
         update_service.save_old_state()
