@@ -5,6 +5,7 @@ from apps.auth_app.validators import validate_human_name
 
 User = get_user_model()
 
+
 class ProfileResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     username = serializers.CharField()
@@ -24,7 +25,8 @@ class UpdateProfileRequestSerializer(serializers.ModelSerializer):
         model = User
         fields = ['first_name', 'last_name']
 
-    def validate_first_name(self, value):
+    @staticmethod
+    def validate_first_name(value):
         if value:
             try:
                 validate_human_name(value, "first_name")
@@ -32,7 +34,8 @@ class UpdateProfileRequestSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(str(e))
         return value
 
-    def validate_last_name(self, value):
+    @staticmethod
+    def validate_last_name(value):
         if value:
             try:
                 validate_human_name(value, "last_name")
@@ -44,3 +47,15 @@ class UpdateProfileRequestSerializer(serializers.ModelSerializer):
 class ResubmitTeacherApprovalResponseSerializer(serializers.Serializer):
     message = serializers.CharField(read_only=True)
     approval_id = serializers.IntegerField(read_only=True)
+
+
+class GoogleCalendarInitResponseSerializer(serializers.Serializer):
+    authorization_url = serializers.URLField()
+
+
+class GoogleCalendarRedirectResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
+
+
+class GoogleCalendarDisconnectResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()

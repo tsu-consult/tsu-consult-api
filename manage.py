@@ -13,6 +13,7 @@ def start_docker_compose():
     subprocess.run(["docker", "compose", "up", "-d"], check=True)
     print("✅ All services started.")
 
+
 def stop_docker_compose():
     print("🛑 Stopping docker-compose services...")
     try:
@@ -37,7 +38,7 @@ def stop_celery(process):
         process.terminate()
         process.wait(timeout=5)
         print("✅ Celery worker stopped.")
-    except Exception as e:
+    except (OSError, RuntimeError, TimeoutError) as e:
         print(f"⚠️ Failed to stop Celery: {e}")
 
 
@@ -62,7 +63,7 @@ def init_superuser():
     admin_password = os.environ.get("DJANGO_ADMIN_PASSWORD", "admin123")
 
     if not user.objects.filter(username=admin_username).exists():
-        user.objects.create_superuser( # type: ignore[attr-defined]
+        user.objects.create_superuser(  # type: ignore[attr-defined]
             username=admin_username,
             email=admin_email,
             password=admin_password
@@ -71,10 +72,11 @@ def init_superuser():
     else:
         print(f"ℹ️ Superuser '{admin_username}' already exists.")
 
+
 def main():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
-    DEBUG = os.environ.get("DEBUG", "True").lower() in ["1", "true", "yes"]
+    debug = os.environ.get("DEBUG", "True").lower() in ["1", "true", "yes"]
     runserver_related = len(sys.argv) > 1 and sys.argv[1] in ["runserver", "migrate", "shell"]
 
     try:
@@ -87,7 +89,7 @@ def main():
     print("💾 Setting up Django...")
     django.setup()
 
-    if runserver_related and DEBUG:
+    if runserver_related and debug:
         start_docker_compose()
         atexit.register(stop_docker_compose)
         wait_for_db()
