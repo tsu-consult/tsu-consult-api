@@ -152,8 +152,8 @@ def sync_existing_todos(self, user_id: int):
         logger.exception("DB error loading user %s: %s", user_id, exc)
         return
 
-    creator_qs = ToDo.objects.filter(creator=user)
-    assignee_qs = ToDo.objects.filter(assignee=user)
+    creator_qs = ToDo.objects.filter(creator=user, deleted_at__isnull=True)
+    assignee_qs = ToDo.objects.filter(assignee=user, deleted_at__isnull=True)
     processed = set()
 
     def _process(td: ToDo, role: str, participant_user):
@@ -161,8 +161,12 @@ def sync_existing_todos(self, user_id: int):
             return
         processed.add(td.id)
 
-        if not _ensure_future_deadline(td):
-            logger.debug("skip todo %s: no future deadline", td.id)
+        if td.is_deleted():
+            logger.debug("skip todo %s: task is deleted", td.id)
+            return
+
+        if not getattr(td, "deadline", None):
+            logger.debug("skip todo %s: no deadline set", td.id)
             return
 
         if role == "creator":
@@ -180,7 +184,12 @@ def sync_existing_todos(self, user_id: int):
             active_field = "assignee_calendar_event_active" if (
                 hasattr(td, "assignee_calendar_event_active")) else "calendar_event_active"
 
-        reminders = normalize_reminders_permissive(raw_reminders)
+        try:
+            reminders = normalize_reminders_permissive(raw_reminders)
+        except DRFValidationError:
+            logger.debug("No valid reminders for todo %s (role=%s), will create calendar event without reminders",
+                         td.id, role)
+            reminders = []
 
         calendar_service = GoogleCalendarService(user=participant_user)
 
@@ -393,10 +402,10 @@ def transfer_unsent_reminders_task(user_id: int):
 
     try:
         creator_qs = ToDo.objects.filter(
-            creator_id=user_id, deadline__gt=now, calendar_event_id__isnull=False
+            creator_id=user_id, deadline__gt=now, calendar_event_id__isnull=False, deleted_at__isnull=True
         )
         assignee_qs = ToDo.objects.filter(
-            assignee_id=user_id, deadline__gt=now, assignee_calendar_event_id__isnull=False
+            assignee_id=user_id, deadline__gt=now, assignee_calendar_event_id__isnull=False, deleted_at__isnull=True
         )
     except DatabaseError as exc:
         logger.exception("DB error while querying ToDo: %s", exc)
@@ -405,6 +414,10 @@ def transfer_unsent_reminders_task(user_id: int):
     frs = FallbackReminderService()
 
     def _process(td: ToDo, role: str):
+        if td.is_deleted():
+            logger.debug("skip todo %s: task is deleted", td.id)
+            return
+
         if role == "creator":
             reminders_raw = td.reminders
             target_user_id = td.creator_id
