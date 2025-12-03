@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from apps.auth_app.validators import validate_human_name
+from apps.auth_app.serializers import password_validator
 
 User = get_user_model()
 
@@ -41,6 +42,32 @@ class UpdateProfileRequestSerializer(serializers.ModelSerializer):
                 validate_human_name(value, "last_name")
             except ValueError as e:
                 raise serializers.ValidationError(str(e))
+        return value
+
+
+class ChangeEmailRequestSerializer(serializers.Serializer):
+    new_email = serializers.EmailField(required=True)
+
+    def validate_new_email(self, value):
+        user = self.context.get('user')
+        if User.objects.filter(email=value).exclude(id=user.id).exists():
+            raise serializers.ValidationError("This email is already in use by another user.")
+        return value
+
+
+class ChangePasswordRequestSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    new_password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+        validators=[password_validator]
+    )
+
+    def validate_current_password(self, value):
+        user = self.context.get('user')
+        if not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
         return value
 
 
