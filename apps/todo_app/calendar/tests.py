@@ -12,7 +12,7 @@ from apps.todo_app.models import ToDo
 from core.exceptions import EventNotFound
 
 
-class GoogleCalendarServiceUpdateEventTests(TestCase):
+class BaseGoogleCalendarServiceTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
             email='test@example.com',
@@ -28,6 +28,8 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
             reminders=[{'method': 'popup', 'minutes': 10}]
         )
 
+
+class GoogleCalendarServiceUpdateEventTests(BaseGoogleCalendarServiceTests):
     @staticmethod
     def _create_mock_service_with_patch_error(error_or_side_effect):
         mock_service = Mock()
@@ -317,22 +319,7 @@ class GoogleCalendarServiceUpdateEventTests(TestCase):
             self.assertEqual(service.calendar_id, 'new-calendar-id')
 
 
-class GoogleCalendarServiceDeleteEventTests(TestCase):
-    def setUp(self):
-        self.user = User.objects.create_user(
-            email='test@example.com',
-            username='testuser',
-            role='teacher'
-        )
-        self.todo = ToDo.objects.create(
-            title='Test Task',
-            description='Test Description',
-            deadline=timezone.now() + timedelta(hours=2),
-            creator=self.user,
-            assignee=self.user,
-            reminders=[{'method': 'popup', 'minutes': 10}]
-        )
-
+class GoogleCalendarServiceDeleteEventTests(BaseGoogleCalendarServiceTests):
     @staticmethod
     def _create_mock_service_with_delete_success():
         mock_service = Mock()

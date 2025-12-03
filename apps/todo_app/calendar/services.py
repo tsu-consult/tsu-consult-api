@@ -104,6 +104,16 @@ class GoogleCalendarService:
     def _ensure_credentials_valid(self):
         return self._check_credentials()
 
+    @staticmethod
+    def _extract_http_status(http_error: HttpError) -> Optional[int]:
+        try:
+            status_raw = getattr(http_error.resp, 'status', None)
+            if status_raw is not None:
+                return int(status_raw)
+        except (AttributeError, TypeError, ValueError):
+            pass
+        return None
+
     def _get_or_create_calendar(self) -> Optional[str]:
         if not self.service:
             return None
@@ -289,14 +299,8 @@ class GoogleCalendarService:
             return self.service.events().get(calendarId=self.calendar_id, eventId=event_id).execute()
         except RefreshError:
             self._handle_refresh_error()
-        except HttpError as e:
-            status = None
-            try:
-                status_raw = getattr(e.resp, 'status', None)
-                if status_raw is not None:
-                    status = int(status_raw)
-            except (AttributeError, TypeError, ValueError):
-                status = None
+        except HttpError as exc:
+            status = self._extract_http_status(exc)
 
             if status == 404:
                 raise EventNotFound(event_id)
@@ -399,13 +403,7 @@ class GoogleCalendarService:
         except RefreshError:
             self._handle_refresh_error()
         except HttpError as exc:
-            status = None
-            try:
-                status_raw = getattr(exc.resp, 'status', None)
-                if status_raw is not None:
-                    status = int(status_raw)
-            except (AttributeError, TypeError, ValueError):
-                status = None
+            status = self._extract_http_status(exc)
 
             if status == 404:
                 raise EventNotFound(event_id)
@@ -481,13 +479,7 @@ class GoogleCalendarService:
             self._handle_refresh_error()
             return False
         except HttpError as exc:
-            status = None
-            try:
-                status_raw = getattr(exc.resp, 'status', None)
-                if status_raw is not None:
-                    status = int(status_raw)
-            except (AttributeError, TypeError, ValueError):
-                status = None
+            status = self._extract_http_status(exc)
 
             if status == 404:
                 logger.info("Event %s not found (already deleted?) for todo id=%s",
