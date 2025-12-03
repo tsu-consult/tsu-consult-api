@@ -309,7 +309,7 @@ class GoogleCalendarService:
 
             logger.exception(
                 "Google API HttpError while getting event for user id=%s, event_id=%s: %s",
-                getattr(self.user, 'id', None), event_id, e,
+                getattr(self.user, 'id', None), event_id, exc,
             )
             raise
         except (ValueError, TypeError) as exc:

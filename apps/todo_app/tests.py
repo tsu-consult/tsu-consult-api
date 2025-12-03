@@ -2010,3 +2010,338 @@ class ToDoRemindersDeadlineUpdateTests(BaseTest):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(mock_service.delete_event.called)
         self.assertGreaterEqual(mock_service.delete_event.call_count, 1)
+
+
+class ToDoDeleteTests(APITestCase):
+    def setUp(self):
+        self.creator = User.objects.create_user(
+            email="creator@example.com",
+            username="creator",
+            password="password",
+            role="dean"
+        )
+        self.assignee = User.objects.create_user(
+            email="assignee@example.com",
+            username="assignee",
+            password="password",
+            role="teacher"
+        )
+        self.other_user = User.objects.create_user(
+            email="other@example.com",
+            username="other",
+            password="password",
+            role="teacher"
+        )
+
+        self.todo = ToDo.objects.create(
+            title="Test Task",
+            description="Test Description",
+            deadline=timezone.now() + timedelta(days=1),
+            creator=self.creator,
+            assignee=self.assignee,
+        )
+
+        self.cancel_notifications_patcher = patch('apps.todo_app.views.cancel_pending_notifications_for_user')
+        self.mock_cancel_notifications = self.cancel_notifications_patcher.start()
+        self.addCleanup(self.cancel_notifications_patcher.stop)
+
+        self.calendar_service_patcher = patch('apps.todo_app.views.GoogleCalendarService')
+        self.mock_calendar_service_cls = self.calendar_service_patcher.start()
+        self.addCleanup(self.calendar_service_patcher.stop)
+
+        self.logger_patcher = patch('apps.todo_app.views.logger.exception')
+        self.mock_logger_exception = self.logger_patcher.start()
+        self.addCleanup(self.logger_patcher.stop)
+
+    def test_creator_can_delete_todo(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.todo.refresh_from_db()
+        self.assertIsNotNone(self.todo.deleted_at)
+        self.assertTrue(self.todo.is_deleted())
+
+    def test_assignee_cannot_delete_todo(self):
+        self.client.force_authenticate(user=self.assignee)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Only the creator can delete this task", response.data['message'])
+        self.todo.refresh_from_db()
+        self.assertIsNone(self.todo.deleted_at)
+
+    def test_other_user_cannot_delete_todo(self):
+        self.client.force_authenticate(user=self.other_user)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 403)
+        self.todo.refresh_from_db()
+        self.assertIsNone(self.todo.deleted_at)
+
+    def test_unauthenticated_user_cannot_delete_todo(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 401)
+        self.todo.refresh_from_db()
+        self.assertIsNone(self.todo.deleted_at)
+
+    def test_delete_nonexistent_todo(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete("/todo/999999/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_invalid_todo_id(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete("/todo/invalid_id/")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_delete_already_deleted_todo(self):
+        self.todo.deleted_at = timezone.now()
+        self.todo.save(update_fields=['deleted_at'])
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("Task has already been deleted", response.data['message'])
+
+    def test_delete_cancels_creator_notifications(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+
+        creator_calls = [call for call in self.mock_cancel_notifications.call_args_list
+                         if call[0][1] == self.creator]
+        self.assertEqual(len(creator_calls), 1)
+
+        call_args, call_kwargs = creator_calls[0]
+        self.assertEqual(call_args[0], self.todo)
+        self.assertEqual(call_kwargs.get('reason'), 'Task deleted')
+        self.assertEqual(call_kwargs.get('only_deadline'), False)
+
+    def test_delete_cancels_assignee_notifications(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+
+        assignee_calls = [call for call in self.mock_cancel_notifications.call_args_list
+                          if call[0][1] == self.assignee]
+        self.assertEqual(len(assignee_calls), 1)
+
+        call_args, call_kwargs = assignee_calls[0]
+        self.assertEqual(call_args[0], self.todo)
+        self.assertEqual(call_kwargs.get('reason'), 'Task deleted')
+        self.assertEqual(call_kwargs.get('only_deadline'), False)
+
+    def test_delete_without_assignee_only_cancels_creator_notifications(self):
+        self.todo.assignee = None
+        self.todo.save(update_fields=['assignee'])
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+
+        self.assertEqual(self.mock_cancel_notifications.call_count, 1)
+        call_args, call_kwargs = self.mock_cancel_notifications.call_args
+        self.assertEqual(call_args[1], self.creator)
+
+    def test_delete_removes_creator_calendar_event(self):
+        self.todo.calendar_event_id = 'creator_event_123'
+        self.todo.calendar_event_active = True
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
+
+        mock_creator_service = Mock()
+        mock_creator_service.service = True
+        mock_creator_service.delete_event = Mock()
+        self.mock_calendar_service_cls.return_value = mock_creator_service
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.mock_calendar_service_cls.assert_any_call(self.creator)
+        mock_creator_service.delete_event.assert_called_with(self.todo)
+
+    def test_delete_removes_assignee_calendar_event(self):
+        self.todo.assignee_calendar_event_id = 'assignee_event_456'
+        self.todo.assignee_calendar_event_active = True
+        self.todo.save(update_fields=['assignee_calendar_event_id', 'assignee_calendar_event_active'])
+
+        mock_service = Mock()
+        mock_service.service = True
+        mock_service.delete_event = Mock()
+        self.mock_calendar_service_cls.return_value = mock_service
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.mock_calendar_service_cls.assert_any_call(self.assignee)
+        mock_service.delete_event.assert_called()
+
+    def test_delete_removes_both_calendar_events(self):
+        self.todo.calendar_event_id = 'creator_event_123'
+        self.todo.calendar_event_active = True
+        self.todo.assignee_calendar_event_id = 'assignee_event_456'
+        self.todo.assignee_calendar_event_active = True
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active',
+                                      'assignee_calendar_event_id', 'assignee_calendar_event_active'])
+
+        mock_service = Mock()
+        mock_service.service = True
+        mock_service.delete_event = Mock()
+        self.mock_calendar_service_cls.return_value = mock_service
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+
+        calls = self.mock_calendar_service_cls.call_args_list
+        called_users = [call[0][0] for call in calls]
+        self.assertIn(self.creator, called_users)
+        self.assertIn(self.assignee, called_users)
+
+        self.assertGreaterEqual(mock_service.delete_event.call_count, 2)
+
+    def test_delete_without_calendar_events_succeeds(self):
+        self.todo.calendar_event_id = None
+        self.todo.calendar_event_active = False
+        self.todo.assignee_calendar_event_id = None
+        self.todo.assignee_calendar_event_active = False
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active',
+                                      'assignee_calendar_event_id', 'assignee_calendar_event_active'])
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.mock_calendar_service_cls.call_count, 0)
+
+    def test_delete_handles_calendar_service_exception_for_creator(self):
+        self.todo.calendar_event_id = 'creator_event_123'
+        self.todo.calendar_event_active = True
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
+
+        mock_service = Mock()
+        mock_service.service = True
+        mock_service.delete_event = Mock(side_effect=Exception("Calendar API error"))
+        self.mock_calendar_service_cls.return_value = mock_service
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.todo.refresh_from_db()
+        self.assertIsNotNone(self.todo.deleted_at)
+
+        self.assertTrue(self.mock_logger_exception.called)
+
+    def test_delete_handles_calendar_service_exception_for_assignee(self):
+        self.todo.assignee_calendar_event_id = 'assignee_event_456'
+        self.todo.assignee_calendar_event_active = True
+        self.todo.save(update_fields=['assignee_calendar_event_id', 'assignee_calendar_event_active'])
+
+        mock_service = Mock()
+        mock_service.service = True
+        mock_service.delete_event = Mock(side_effect=Exception("Calendar API error"))
+        self.mock_calendar_service_cls.return_value = mock_service
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.todo.refresh_from_db()
+        self.assertIsNotNone(self.todo.deleted_at)
+
+    def test_delete_skips_calendar_event_when_service_unavailable(self):
+        self.todo.calendar_event_id = 'creator_event_123'
+        self.todo.calendar_event_active = True
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
+
+        mock_service = Mock()
+        mock_service.service = None
+        self.mock_calendar_service_cls.return_value = mock_service
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.todo.refresh_from_db()
+        self.assertIsNotNone(self.todo.deleted_at)
+
+        mock_service.delete_event.assert_not_called()
+
+    def test_delete_sets_deleted_at_timestamp(self):
+        before_delete = timezone.now()
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        after_delete = timezone.now()
+
+        self.assertEqual(response.status_code, 204)
+        self.todo.refresh_from_db()
+
+        self.assertIsNotNone(self.todo.deleted_at)
+        self.assertGreaterEqual(self.todo.deleted_at, before_delete)
+        self.assertLessEqual(self.todo.deleted_at, after_delete)
+
+    def test_delete_with_calendar_event_active_only(self):
+        self.todo.calendar_event_id = None
+        self.todo.calendar_event_active = True
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
+
+        mock_service = Mock()
+        mock_service.service = True
+        mock_service.delete_event = Mock()
+        self.mock_calendar_service_cls.return_value = mock_service
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.mock_calendar_service_cls.assert_called()
+
+    def test_delete_with_event_id_only(self):
+        self.todo.calendar_event_id = 'creator_event_123'
+        self.todo.calendar_event_active = False
+        self.todo.save(update_fields=['calendar_event_id', 'calendar_event_active'])
+
+        mock_service = Mock()
+        mock_service.service = True
+        mock_service.delete_event = Mock()
+        self.mock_calendar_service_cls.return_value = mock_service
+
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.delete(f"/todo/{self.todo.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.mock_calendar_service_cls.assert_called()
+
+    def test_student_cannot_delete_todo(self):
+        student = User.objects.create_user(
+            email="student@example.com",
+            username="student",
+            password="password",
+            role="student"
+        )
+
+        todo = ToDo.objects.create(
+            title="Student Task",
+            description="Test",
+            deadline=timezone.now() + timedelta(days=1),
+            creator=student,
+        )
+
+        self.client.force_authenticate(user=student)
+        response = self.client.delete(f"/todo/{todo.id}/")
+
+        self.assertEqual(response.status_code, 403)
