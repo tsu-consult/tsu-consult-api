@@ -1,4 +1,4 @@
-﻿from django.contrib import admin, messages
+from django.contrib import admin, messages
 from django.utils.translation import gettext_lazy as _
 from apps.auth_app.models import DeanApproval, User
 from ..site import admin_site
