@@ -142,6 +142,7 @@ JAZZMIN_SETTINGS = {
         "auth_app.user": "fas fa-user",
         "auth_app.teacherapproval": "fas fa-chalkboard-teacher",
         "auth_app.deanapproval": "fas fa-chalkboard-teacher",
+        "todo_app.todo": "fas fa-tasks",
     },
 
     # "show_ui_builder" : True,
