@@ -57,9 +57,33 @@ def custom_exception_handler(exc, context):
             str(exc.detail)
         )
 
+    if isinstance(exc, GoogleCalendarAuthRequired):
+        return ErrorResponseMixin.format_error(
+            request,
+            status.HTTP_409_CONFLICT,
+            "Conflict",
+            "You need to re-integrate with Google Calendar."
+        )
+
+    if isinstance(exc, EventNotFound):
+        return ErrorResponseMixin.format_error(
+            request,
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            "Calendar event not found."
+        )
+
     return ErrorResponseMixin.format_error(
         request,
         status.HTTP_500_INTERNAL_SERVER_ERROR,
         "Internal Server Error",
         str(exc)
     )
+
+
+class GoogleCalendarAuthRequired(Exception):
+    pass
+
+
+class EventNotFound(Exception):
+    pass

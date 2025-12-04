@@ -3,9 +3,10 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth import get_user_model
 
-from apps.auth_app.models import TeacherApproval
+from apps.auth_app.models import TeacherApproval, DeanApproval
 
 User = get_user_model()
+
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
@@ -32,6 +33,14 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(TeacherApproval)
 class TeacherApprovalAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "status", "created_at", "updated_at")
+    list_filter = ("status",)
+    search_fields = ("user__username", "user__email")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(DeanApproval)
+class DeanApprovalAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "status", "created_at", "updated_at")
     list_filter = ("status",)
     search_fields = ("user__username", "user__email")

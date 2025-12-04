@@ -2,7 +2,7 @@
 from django.contrib.auth import get_user_model
 from django.core.validators import RegexValidator
 
-from apps.auth_app.models import TeacherApproval
+from apps.auth_app.models import TeacherApproval, DeanApproval
 from apps.auth_app.validators import validate_human_name
 
 User = get_user_model()
@@ -11,6 +11,7 @@ password_validator = RegexValidator(
     regex=r'^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$',
     message="Password must be at least 8 characters long, include at least one letter and one number"
 )
+
 
 class RegisterRequestSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=False)
@@ -39,6 +40,14 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
             if not attrs.get("telegram_id"):
                 raise serializers.ValidationError("Students and teachers require telegram_id.")
             attrs["email"] = attrs.get("email") or None
+        elif role == User.Role.DEAN:
+            if not attrs.get("telegram_id"):
+                raise serializers.ValidationError("Deans require telegram_id.")
+            email = attrs.get("email")
+            password = attrs.get("password")
+            if (email and not password) or (password and not email):
+                raise serializers.ValidationError("For deans, both email and password must be provided together, "
+                                                  "or neither.")
         elif role == User.Role.ADMIN:
             if not attrs.get("email") or not attrs.get("password"):
                 raise serializers.ValidationError("Email and password are required for the administrator.")
@@ -62,6 +71,7 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         role = validated_data.get("role", User.Role.STUDENT)
+        password = validated_data.pop("password", None)
 
         if not validated_data.get("email"):
             validated_data["email"] = f"{validated_data['telegram_id']}@telegram.local"
@@ -70,17 +80,29 @@ class RegisterRequestSerializer(serializers.ModelSerializer):
 
         if role in [User.Role.STUDENT, User.Role.TEACHER]:
             user.set_unusable_password()
-            if role == User.Role.TEACHER:
-                user.status = User.Status.PENDING
+        elif role == User.Role.DEAN:
+            if password:
+                user.set_password(password)
+            else:
+                user.set_unusable_password()
+            user.status = User.Status.PENDING
+        elif role == User.Role.ADMIN:
+            user.set_password(password)
         else:
-            user.set_password(validated_data["password"])
+            user.set_unusable_password()
+
+        if role == User.Role.TEACHER:
+            user.status = User.Status.PENDING
 
         user.save()
 
         if role == User.Role.TEACHER:
             TeacherApproval.objects.create(user=user)
+        elif role == User.Role.DEAN:
+            DeanApproval.objects.create(user=user)
 
         return user
+
 
 class RegisterResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
@@ -105,6 +127,7 @@ class LoginRequestSerializer(serializers.Serializer):
 
         raise serializers.ValidationError("Either telegram_id or email and password are required.")
 
+
 class LoginResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
     refresh = serializers.CharField()
@@ -113,9 +136,26 @@ class LoginResponseSerializer(serializers.Serializer):
 class RefreshRequestSerializer(serializers.Serializer):
     refresh = serializers.CharField()
 
+
 class RefreshResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
 
 
 class LogoutRequestSerializer(serializers.Serializer):
     refresh = serializers.CharField()
+
+
+class AddCredentialsRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(
+        write_only=True,
+        validators=[password_validator],
+        style={'input_type': 'password'},
+        required=True
+    )
+
+    @staticmethod
+    def validate_email(value):
+        if User.objects.filter(email=value).exclude(email__endswith='@telegram.local').exists():
+            raise serializers.ValidationError("This email is already in use by another user.")
+        return value

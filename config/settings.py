@@ -10,12 +10,12 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 from pathlib import Path
+import sys
 
 from decouple import config, Csv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -34,7 +34,7 @@ if DEBUG:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
     CORS_ALLOW_ALL_ORIGINS = True
-    
+
     CSRF_TRUSTED_ORIGINS = [
         'http://localhost:8000',
         'http://127.0.0.1:8000',
@@ -62,7 +62,6 @@ else:
 # SECURITY
 AUTH_USER_MODEL = 'auth_app.User'
 
-
 # Application definition
 INSTALLED_APPS = [
     'jazzmin',
@@ -81,6 +80,7 @@ INSTALLED_APPS = [
     'apps.teacher_app',
     'apps.consultation_app',
     'apps.notification_app',
+    'apps.todo_app',
     'corsheaders',
 ]
 
@@ -93,6 +93,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'core.middleware.JazzminRoleBasedMenuMiddleware',  # Кастомизация меню для деканата
 ]
 
 REST_FRAMEWORK = {
@@ -110,14 +111,15 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates']
-        ,
+        'DIRS': [BASE_DIR / 'templates'],
+
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'core.context_processors.jazzmin_context',
             ],
         },
     },
@@ -128,18 +130,19 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Jazzmin
 JAZZMIN_SETTINGS = {
     "site_title": "TSU Consult",
-    "site_header": "TSU Consult Admin",
-    "site_brand": "TSU Consult Admin",
-    "welcome_sign": "Welcome to the TSU Consult Admin",
+    "site_header": "TSU Consult",
+    "site_brand": "TSU Consult",
+    "welcome_sign": "Welcome to the TSU Consult",
 
     "topmenu_links": [
-
-        {"name": "Home",  "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"name": "Home", "url": "admin:index", "permissions": ["auth.view_user"]},
     ],
 
     "icons": {
         "auth_app.user": "fas fa-user",
         "auth_app.teacherapproval": "fas fa-chalkboard-teacher",
+        "auth_app.deanapproval": "fas fa-chalkboard-teacher",
+        "todo_app.todo": "fas fa-tasks",
     },
 
     # "show_ui_builder" : True,
@@ -148,7 +151,6 @@ JAZZMIN_SETTINGS = {
 JAZZMIN_UI_TWEAKS = {
     "theme": "flatly",
 }
-
 
 # Swagger
 SWAGGER_SETTINGS = {
@@ -161,31 +163,40 @@ SWAGGER_SETTINGS = {
         }
     },
     'USE_SESSION_AUTH': False,
-    'DEFAULT_MODEL_RENDERING' : 'example',
-    'DISPLAY_OPERATION_ID' : False,
+    'DEFAULT_MODEL_RENDERING': 'example',
+    'DISPLAY_OPERATION_ID': False,
     'DEFAULT_AUTO_SCHEMA_CLASS': 'core.schema.CustomAutoSchema',
-    'OPERATIONS_SORTER' : 'method',
-    'TAGS_SORTER' : 'alpha',
-    "DEFAULT_API_URL": "http://localhost:8000/" if DEBUG else "https://api.tsu-consult.orexi4.ru/",
+    'OPERATIONS_SORTER': 'method',
+    'TAGS_SORTER': 'alpha',
+    "DEFAULT_API_URL": "http://127.0.0.1:8000" if DEBUG else "https://api.tsu-consult.orexi4.ru",
 }
-
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='postgres'),
-        'USER': config('DB_USER', default='postgres'),
-        'PASSWORD': config('DB_PASSWORD', default='postgres'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
+if 'test' in sys.argv:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
     }
-}
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': config('DB_NAME', default='postgres'),
+            'USER': config('DB_USER', default='postgres'),
+            'PASSWORD': config('DB_PASSWORD', default='postgres'),
+            'HOST': config('DB_HOST', default='localhost'),
+            'PORT': config('DB_PORT', default='5432'),
+        }
+    }
 
 # Redis
-REDIS_FLAGS_URL = config('REDIS_FLAGS_URL', default='redis://localhost:6379/1')
+REDIS_FLAGS_URL = config('REDIS_FLAGS_URL', default='redis://localhost:6379/2')
 
 # Celery
 CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
@@ -195,8 +206,13 @@ CELERY_TASK_SERIALIZER = config("CELERY_TASK_SERIALIZER", default="json")
 CELERY_RESULT_SERIALIZER = config("CELERY_RESULT_SERIALIZER", default="json")
 CELERY_TIMEZONE = config("CELERY_TIMEZONE", default="Asia/Tomsk")
 
-#Bot
-TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
+# Bot
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='8220296609:AAGAXg9tQRDUUm0vqwfHN21iPGsOSJAtw7E')
+
+# Google Calendar
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+GOOGLE_CLIENT_SECRET = config('GOOGLE_CLIENT_SECRET', default='')
+GOOGLE_PROJECT_ID = config('GOOGLE_PROJECT_ID', default='')
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -216,7 +232,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
@@ -227,7 +242,6 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
-
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/

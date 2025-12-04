@@ -1,5 +1,6 @@
 ﻿import re
 
+
 def validate_human_name(value: str, field_name: str = "first_name") -> None:
     value = value.strip()
 
