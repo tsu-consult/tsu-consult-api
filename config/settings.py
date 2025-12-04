@@ -93,6 +93,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'core.middleware.JazzminRoleBasedMenuMiddleware',  # Кастомизация меню для деканата
 ]
 
 REST_FRAMEWORK = {
@@ -118,6 +119,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'core.context_processors.jazzmin_context',
             ],
         },
     },
@@ -128,18 +130,19 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Jazzmin
 JAZZMIN_SETTINGS = {
     "site_title": "TSU Consult",
-    "site_header": "TSU Consult Admin",
-    "site_brand": "TSU Consult Admin",
-    "welcome_sign": "Welcome to the TSU Consult Admin",
+    "site_header": "TSU Consult",
+    "site_brand": "TSU Consult",
+    "welcome_sign": "Welcome to the TSU Consult",
 
     "topmenu_links": [
-
         {"name": "Home", "url": "admin:index", "permissions": ["auth.view_user"]},
     ],
 
     "icons": {
         "auth_app.user": "fas fa-user",
         "auth_app.teacherapproval": "fas fa-chalkboard-teacher",
+        "auth_app.deanapproval": "fas fa-chalkboard-teacher",
+        "todo_app.todo": "fas fa-tasks",
     },
 
     # "show_ui_builder" : True,

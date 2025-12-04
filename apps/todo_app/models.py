@@ -7,8 +7,8 @@ logger = logging.getLogger(__name__)
 
 class ToDo(models.Model):
     class Status(models.TextChoices):
-        IN_PROGRESS = "in progress", "В процессе"
-        DONE = "done", "Выполнено"
+        IN_PROGRESS = "in progress", "In Progress"
+        DONE = "done", "Done"
 
     id = models.AutoField(primary_key=True)
     title = models.CharField(max_length=255)
@@ -45,6 +45,10 @@ class ToDo(models.Model):
 
     def __str__(self):
         return f"ToDo(id={self.id}, title={self.title}, creator={self.creator_id})"
+
+    class Meta:
+        verbose_name = "To Do"
+        verbose_name_plural = "To Dos"
 
     def is_accessible_by(self, user):
         return user and user.is_authenticated and (
