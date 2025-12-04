@@ -7,6 +7,7 @@ from apps.auth_app.models import TeacherApproval, DeanApproval
 
 User = get_user_model()
 
+
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     list_display = ('id', 'email', 'username', 'role', 'status', 'is_staff', 'is_active')

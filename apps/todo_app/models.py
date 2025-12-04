@@ -46,6 +46,10 @@ class ToDo(models.Model):
     def __str__(self):
         return f"ToDo(id={self.id}, title={self.title}, creator={self.creator_id})"
 
+    class Meta:
+        verbose_name = "To Do"
+        verbose_name_plural = "To Dos"
+
     def is_accessible_by(self, user):
         return user and user.is_authenticated and (
             self.creator_id == user.id or (self.assignee_id and self.assignee_id == user.id)
