@@ -29,7 +29,7 @@
           run: poetry install --no-interaction --no-ansi
 
         - name: 🧪 Run tests
-          run: poetry run python manage.py test
+          run: poetry run python manage.py test --verbosity=2
 
         - name: 🔐 Login to Docker Hub
           uses: docker/login-action@v3
