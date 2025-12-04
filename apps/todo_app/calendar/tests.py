@@ -276,7 +276,7 @@ class GoogleCalendarServiceUpdateEventTests(BaseGoogleCalendarServiceTests):
         body = call_args[1]['body']
 
         self.assertIn('Updated Task Title', body['summary'])
-        self.assertIn('[Выполнено]', body['summary'])
+        self.assertIn('[Done]', body['summary'])
         self.assertIn('Updated Description', body['description'])
         self.assertIn('dateTime', body['start'])
         self.assertIn('dateTime', body['end'])
