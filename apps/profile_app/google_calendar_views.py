@@ -113,7 +113,7 @@ class GoogleCalendarRedirectView(APIView):
         )
 
         telegram_bot_username = "tsu_consult_dev_bot" if settings.DEBUG else "tsuconsult_bot"
-        redirect_url = f"https://t.me/{telegram_bot_username}?menu=google_success"
+        redirect_url = f"https://t.me/{telegram_bot_username}?start=google_success"
 
         return redirect(redirect_url)
 
