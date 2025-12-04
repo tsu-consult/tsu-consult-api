@@ -1,3 +1,4 @@
+import logging
 import pytz
 from django.contrib import admin
 from django.utils import timezone
@@ -7,13 +8,17 @@ from admin_site import admin_site
 from apps.todo_app.admin_api_service import ToDoAdminAPIService
 from apps.todo_app.models import ToDo
 
+logger = logging.getLogger(__name__)
+
 
 @admin.register(ToDo, site=admin_site)
 class ToDoAdmin(admin.ModelAdmin):
     list_display = ('title', 'status_badge', 'creator', 'assignee', 'deadline_display', 'created_at_tomsk')
-    list_filter = ('status', 'created_at', 'deadline')
+    list_filter = ('status', 'created_at', 'deadline', 'deleted_at')
     search_fields = ('title', 'description', 'creator__username', 'assignee__username')
     ordering = ('-created_at',)
+
+    actions = ['soft_delete_selected']
 
     fieldsets = (
         ('Main Information', {
@@ -63,15 +68,21 @@ class ToDoAdmin(admin.ModelAdmin):
     updated_at_tomsk.short_description = 'Updated at (Tomsk)'
 
     def status_badge(self, obj):
-        if obj.status == ToDo.Status.DONE:
+        if obj.deleted_at is not None:
+            color = 'red'
+            icon = '🗑️'
+            status_text = 'Deleted'
+        elif obj.status == ToDo.Status.DONE:
             color = 'green'
             icon = '✓'
+            status_text = obj.get_status_display()
         else:
             color = 'orange'
             icon = '⏳'
+            status_text = obj.get_status_display()
         return format_html(
             '<span style="color: {}; font-weight: bold;">{} {}</span>',
-            color, icon, obj.get_status_display()
+            color, icon, status_text
         )
 
     status_badge.short_description = 'Status'
@@ -97,6 +108,9 @@ class ToDoAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
+        if obj is not None and obj.deleted_at is not None:
+            return False
+
         if request.user.is_superuser:
             return True
         if hasattr(request.user, 'role'):
@@ -107,6 +121,9 @@ class ToDoAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.deleted_at is not None:
+            return False
+
         if request.user.is_superuser:
             return True
         if hasattr(request.user, 'role'):
@@ -125,6 +142,8 @@ class ToDoAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
+
+
         if request.user.is_superuser:
             return qs
         if hasattr(request.user, 'role'):
@@ -165,14 +184,84 @@ class ToDoAdmin(admin.ModelAdmin):
             api_service.update_todo(obj.pk, data)
 
     def delete_model(self, request, obj):
+        logger.info(f"Admin delete_model called for ToDo id={obj.pk}")
         api_service = ToDoAdminAPIService(request.user)
-
         api_service.delete_todo(obj.pk)
+        obj.refresh_from_db()
+        logger.info(f"ToDo id={obj.pk} soft deleted via API, deleted_at={obj.deleted_at}")
 
     def delete_queryset(self, request, queryset):
         api_service = ToDoAdminAPIService(request.user)
 
-        count = 0
         for obj in queryset:
+            logger.info(f"Admin bulk delete for ToDo id={obj.pk}")
             api_service.delete_todo(obj.pk)
-            count += 1
+            logger.info(f"ToDo id={obj.pk} soft deleted via API")
+
+    @admin.action(description='Delete selected tasks (soft delete)')
+    def soft_delete_selected(self, request, queryset):
+        queryset = queryset.filter(deleted_at__isnull=True)
+
+        count = 0
+        api_service = ToDoAdminAPIService(request.user)
+
+        for obj in queryset:
+            if self.has_delete_permission(request, obj):
+                logger.info(f"Admin soft_delete_selected for ToDo id={obj.pk}")
+                try:
+                    api_service.delete_todo(obj.pk)
+                    count += 1
+                    logger.info(f"ToDo id={obj.pk} soft deleted via API")
+                except Exception as e:
+                    logger.error(f"Failed to soft delete ToDo id={obj.pk}: {e}")
+                    self.message_user(request, f"Failed to delete task {obj.title}: {str(e)}", level='error')
+
+        self.message_user(request, f"Successfully deleted {count} task(s).", level='success')
+
+    def get_deleted_objects(self, objs, request):
+        deleted_objects = []
+        model_count = {}
+        perms_needed = set()
+        protected = []
+
+        for obj in objs:
+            deleted_objects.append(f'{obj._meta.verbose_name}: {obj}')
+            model_count[obj._meta.verbose_name] = model_count.get(obj._meta.verbose_name, 0) + 1
+
+        return deleted_objects, model_count, perms_needed, protected
+
+    def delete_view(self, request, object_id, extra_context=None):
+        from django.contrib.admin.utils import unquote
+        from django.http import HttpResponseRedirect
+        from django.urls import reverse
+        from django.contrib import messages
+
+        obj = self.get_object(request, unquote(object_id))
+
+        if obj is None:
+            return self._get_obj_does_not_exist_redirect(request, self.model._meta, object_id)
+
+        if not self.has_delete_permission(request, obj):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+
+        if request.method == 'POST':
+            logger.info(f"delete_view POST for ToDo id={obj.pk}")
+
+            try:
+                api_service = ToDoAdminAPIService(request.user)
+                api_service.delete_todo(obj.pk)
+                obj.refresh_from_db()
+
+                logger.info(f"ToDo id={obj.pk} soft deleted via API in delete_view")
+
+                messages.success(request, f'The task "{obj}" was deleted successfully.')
+
+                return HttpResponseRedirect(reverse('tsu_admin:todo_app_todo_changelist'))
+
+            except Exception as e:
+                logger.error(f"Failed to soft delete ToDo id={obj.pk} in delete_view: {e}")
+                messages.error(request, f'Failed to delete task: {str(e)}')
+                return HttpResponseRedirect(request.path)
+
+        return super().delete_view(request, object_id, extra_context)
