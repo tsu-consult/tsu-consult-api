@@ -1,5 +1,6 @@
 import logging
 import pytz
+from django import forms
 from django.contrib import admin
 from django.utils import timezone
 from django.utils.html import format_html
@@ -11,8 +12,74 @@ from apps.todo_app.models import ToDo
 logger = logging.getLogger(__name__)
 
 
+class ToDoAdminForm(forms.ModelForm):
+    reminder_15_min = forms.BooleanField(
+        required=False,
+        label='15 minutes before deadline',
+        help_text='Send reminder 15 minutes before the deadline'
+    )
+    reminder_30_min = forms.BooleanField(
+        required=False,
+        label='30 minutes before deadline',
+        help_text='Send reminder 30 minutes before the deadline'
+    )
+    reminder_1_hour = forms.BooleanField(
+        required=False,
+        label='1 hour before deadline',
+        help_text='Send reminder 1 hour before the deadline'
+    )
+    reminder_1_day = forms.BooleanField(
+        required=False,
+        label='1 day before deadline',
+        help_text='Send reminder 1 day before the deadline'
+    )
+
+    class Meta:
+        model = ToDo
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if self.instance and self.instance.pk and self.instance.reminders:
+            reminders = self.instance.reminders
+            if isinstance(reminders, list):
+                minutes_list = []
+                for reminder in reminders:
+                    if isinstance(reminder, dict):
+                        minutes_list.append(reminder.get('minutes'))
+                    elif isinstance(reminder, int):
+                        minutes_list.append(reminder)
+
+                self.fields['reminder_15_min'].initial = 15 in minutes_list
+                self.fields['reminder_30_min'].initial = 30 in minutes_list
+                self.fields['reminder_1_hour'].initial = 60 in minutes_list
+                self.fields['reminder_1_day'].initial = 1440 in minutes_list
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+
+        reminders = []
+        if self.cleaned_data.get('reminder_15_min'):
+            reminders.append({"method": "popup", "minutes": 15})
+        if self.cleaned_data.get('reminder_30_min'):
+            reminders.append({"method": "popup", "minutes": 30})
+        if self.cleaned_data.get('reminder_1_hour'):
+            reminders.append({"method": "popup", "minutes": 60})
+        if self.cleaned_data.get('reminder_1_day'):
+            reminders.append({"method": "popup", "minutes": 1440})
+
+        instance.reminders = reminders if reminders else None
+
+        if commit:
+            instance.save()
+        return instance
+
+
 @admin.register(ToDo, site=admin_site)
 class ToDoAdmin(admin.ModelAdmin):
+    form = ToDoAdminForm
+
     list_display = ('title', 'status_badge', 'creator', 'assignee', 'deadline_display', 'created_at_tomsk')
     list_filter = ('status', 'created_at', 'deadline', 'deleted_at')
     search_fields = ('title', 'description', 'creator__username', 'assignee__username')
@@ -27,8 +94,16 @@ class ToDoAdmin(admin.ModelAdmin):
         ('Participants', {
             'fields': ('creator', 'assignee')
         }),
-        ('Deadlines', {
+        ('Deadline', {
             'fields': ('deadline', 'created_at_tomsk', 'updated_at_tomsk')
+        }),
+        ('Reminders Settings', {
+            'fields': (
+                'reminder_15_min',
+                'reminder_30_min',
+                'reminder_1_hour',
+                'reminder_1_day'
+            )
         })
     )
 
@@ -89,18 +164,22 @@ class ToDoAdmin(admin.ModelAdmin):
     status_badge.admin_order_field = 'status'
 
     def has_module_permission(self, request):
-        if request.user.is_superuser:
+        user_role = getattr(request.user, 'role', None)
+        logger.debug(f"has_module_permission: user {request.user.username}, role={user_role}, is_staff={request.user.is_staff}")
+
+        if user_role == 'admin':
+            logger.debug(f"has_module_permission: admin {request.user.username} - EXPLICITLY DENIED")
+            return False
+
+        if user_role == 'dean':
+            logger.debug(f"has_module_permission: dean {request.user.username} - GRANTED")
             return True
-        if hasattr(request.user, 'role'):
-            return request.user.role in ['dean', 'admin']
+
+        logger.debug(f"has_module_permission: user {request.user.username} - DENIED (no matching role)")
         return False
 
     def has_view_permission(self, request, obj=None):
-        if request.user.is_superuser:
-            return True
         if hasattr(request.user, 'role'):
-            if request.user.role == 'admin':
-                return True
             if request.user.role == 'dean':
                 if obj is None:
                     return True
@@ -111,11 +190,7 @@ class ToDoAdmin(admin.ModelAdmin):
         if obj is not None and obj.deleted_at is not None:
             return False
 
-        if request.user.is_superuser:
-            return True
         if hasattr(request.user, 'role'):
-            if request.user.role == 'admin':
-                return True
             if request.user.role == 'dean' and obj is not None:
                 return obj.creator_id == request.user.id
         return False
@@ -124,31 +199,20 @@ class ToDoAdmin(admin.ModelAdmin):
         if obj is not None and obj.deleted_at is not None:
             return False
 
-        if request.user.is_superuser:
-            return True
         if hasattr(request.user, 'role'):
-            if request.user.role == 'admin':
-                return True
             if request.user.role == 'dean' and obj is not None:
                 return obj.creator_id == request.user.id
         return False
 
     def has_add_permission(self, request):
-        if request.user.is_superuser:
-            return True
         if hasattr(request.user, 'role'):
-            return request.user.role in ['dean', 'admin']
+            return request.user.role == 'dean'
         return False
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
 
-
-        if request.user.is_superuser:
-            return qs
         if hasattr(request.user, 'role'):
-            if request.user.role == 'admin':
-                return qs
             if request.user.role == 'dean':
                 return qs.filter(creator=request.user)
         return qs.none()
@@ -175,6 +239,7 @@ class ToDoAdmin(admin.ModelAdmin):
             'description': obj.description,
             'deadline': obj.deadline.isoformat() if obj.deadline else None,
             'assignee_id': obj.assignee_id,
+            'reminders': obj.reminders if obj.reminders is not None else []
         }
 
         if not change:
