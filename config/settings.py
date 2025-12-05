@@ -93,7 +93,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
-    'core.middleware.JazzminRoleBasedMenuMiddleware',
+    'core.middleware.JazzminRoleBasedMenuMiddleware',  # Кастомизация меню для деканата
 ]
 
 REST_FRAMEWORK = {
@@ -174,7 +174,7 @@ SWAGGER_SETTINGS = {
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-if 'test' in sys.argv or config('DJANGO_TEST', default=False, cast=bool):
+if 'test' in sys.argv:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
