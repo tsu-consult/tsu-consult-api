@@ -28,6 +28,9 @@
         - name: 📦 Install dependencies
           run: poetry install --no-interaction --no-ansi
 
+        - name: 📦 Set TEST flag for Django
+          run: echo "DJANGO_TEST=1" >> $GITHUB_ENV
+
         - name: 🧪 Run tests
           run: poetry run python manage.py test --verbosity=2
 
