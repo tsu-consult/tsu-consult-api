@@ -1,4 +1,4 @@
-﻿  name: TSU Consult API CI/CD
+  name: TSU Consult API CI/CD
   
   on:
     push:
