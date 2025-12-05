@@ -93,7 +93,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
-    'core.middleware.JazzminRoleBasedMenuMiddleware',  # Кастомизация меню для деканата
+    'core.middleware.JazzminRoleBasedMenuMiddleware',
 ]
 
 REST_FRAMEWORK = {
@@ -190,7 +190,7 @@ else:
             'NAME': config('DB_NAME', default='postgres'),
             'USER': config('DB_USER', default='postgres'),
             'PASSWORD': config('DB_PASSWORD', default='postgres'),
-            'HOST': config('DB_HOST', default='localhost'),
+            'HOST': config('DB_HOST', default='api.tsu-consult.orexi4'),
             'PORT': config('DB_PORT', default='5432'),
         }
     }
