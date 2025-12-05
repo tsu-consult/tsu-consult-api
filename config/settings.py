@@ -93,7 +93,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
-    'core.middleware.JazzminRoleBasedMenuMiddleware',  # Кастомизация меню для деканата
+    'core.middleware.JazzminRoleBasedMenuMiddleware',
 ]
 
 REST_FRAMEWORK = {
