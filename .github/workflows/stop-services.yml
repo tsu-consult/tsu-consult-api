@@ -1,0 +1,24 @@
+﻿name: TSU Consult API – Stop services
+
+on:
+  workflow_dispatch: {}
+
+env:
+  DEPLOY_USERNAME: 'deployuser'
+
+jobs:
+  stop-services:
+    runs-on: ubuntu-latest
+    environment: Production
+
+    steps:
+      - name: 🛑 Stop TSU Consult API container
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ env.DEPLOY_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "🛑 Stop and remove TSU Consult API container..."
+            docker stop tsu-consult-api || true
+            docker rm tsu-consult-api || true
